@@ -1,0 +1,283 @@
+// harness_state.proto — Inter-agent messages for the multi-agent harness.
+//
+// Spec: specs/ai/harness-design.md §2, §9
+// ADR:  ADR-0014 (Multi-Agent Harness Strategy), ADR-0021 (Agent Communication Protocol)
+// AsyncAPI channel: agent.harness.state
+//
+// All string fields that could contain user content are PII-masked before
+// serialisation (pii_filter.mask_text). Never embed raw user input here.
+//
+// Field number assignments are permanent — never reuse a retired number.
+// Versioning rules: see ADR-0021 §4.
+
+syntax = "proto3";
+
+package harness.v1;
+
+option java_package = "com.example.harness.v1";
+option java_outer_classname = "HarnessStateProto";
+option go_package = "github.com/example/harness/v1;harnessv1";
+
+// ── Enums ─────────────────────────────────────────────────────────────────────
+
+enum SprintStatus {
+  SPRINT_STATUS_UNSPECIFIED = 0;
+  SPRINT_STATUS_PENDING = 1;
+  SPRINT_STATUS_IN_PROGRESS = 2;
+  SPRINT_STATUS_PASSED = 3;
+  SPRINT_STATUS_FAILED = 4;
+  SPRINT_STATUS_ESCALATED = 5;
+}
+
+enum AutonomyLevel {
+  AUTONOMY_LEVEL_UNSPECIFIED = 0;
+  AUTONOMY_LEVEL_READ_ONLY = 1;
+  AUTONOMY_LEVEL_TESTS_ONLY = 2;
+  AUTONOMY_LEVEL_LOW_RISK = 3;
+  AUTONOMY_LEVEL_MEDIUM_RISK = 4;
+  AUTONOMY_LEVEL_FULL = 5;
+}
+
+// ── Core messages ─────────────────────────────────────────────────────────────
+
+// HarnessStateEnvelope is published to the agent.harness.state Kafka topic
+// after each significant state transition in a sprint.
+message HarnessStateEnvelope {
+  // Unique ID for this state event (UUID v4).
+  string event_id = 1;
+
+  // Propagated across all agents in a single user request. Required.
+  string correlation_id = 2;
+
+  // task_id ties back to the originating TaskBrief.
+  string task_id = 3;
+
+  // sprint_id identifies the specific SprintContract.
+  string sprint_id = 4;
+
+  // Current sprint status.
+  SprintStatus status = 5;
+
+  // Which iteration produced this state event (1-based).
+  int32 iteration = 6;
+
+  // ISO-8601 UTC timestamp of this state event.
+  string occurred_at = 7;
+
+  // Optional: forwarded from TaskBrief.trace_id for distributed tracing.
+  string trace_id = 8;
+
+  // Autonomy level active when this event was produced.
+  AutonomyLevel autonomy_level = 9;
+
+  // Embedded payload — exactly one of the following may be set.
+  oneof payload {
+    SprintStarted sprint_started = 10;
+    SprintEvaluated sprint_evaluated = 11;
+    PatchProposalApplied patch_proposal_applied = 12;
+    SprintEscalated sprint_escalated = 13;
+    SprintCompleted sprint_completed = 14;
+  }
+}
+
+// Emitted when the coordinator begins a new sprint iteration.
+message SprintStarted {
+  // Number of objectives in this sprint (not the objectives themselves — PII risk).
+  int32 objective_count = 1;
+  int32 criteria_count = 2;
+  bool patch_proposal_active = 3;
+}
+
+// Emitted after the evaluator scores a sprint attempt.
+message SprintEvaluated {
+  float quality = 1;
+  float originality = 2;
+  float craft = 3;
+  float functionality = 4;
+  float average = 5;
+  bool passed = 6;
+  // Masked evaluator feedback (max 500 chars).
+  string masked_feedback = 7;
+}
+
+// Emitted when a PatchProposal is generated and applied before the next iteration.
+message PatchProposalApplied {
+  // Masked one-sentence summary of the previous approach's failure.
+  string masked_previous_approach_summary = 1;
+  // Masked description of the proposed alternative.
+  string masked_proposed_alternative = 2;
+}
+
+// Emitted when the sprint is escalated to the HITL gateway.
+message SprintEscalated {
+  float final_score_average = 1;
+  int32 total_iterations = 2;
+  int32 patch_proposals_applied = 3;
+  // HITL request ID assigned by the gateway.
+  string hitl_request_id = 4;
+}
+
+// Emitted when the sprint passes evaluation.
+message SprintCompleted {
+  float final_score_average = 1;
+  int32 total_iterations = 2;
+  int32 patch_proposals_applied = 3;
+  int32 decision_count = 4;
+}
+
+// ── AgentContext ──────────────────────────────────────────────────────────────
+// Structured handoff payload used when the context manager resets agent state
+// between sprints. All fields containing user-derived content are masked.
+//
+// Corresponds to: src/agents/harness/models.py::ContextSnapshot
+// Spec: specs/ai/harness-design.md §4
+
+message AgentContext {
+  // Unique agent identifier.
+  string agent_id = 1;
+
+  // ISO-8601 UTC timestamp when this snapshot was created.
+  string created_at = 2;
+
+  // task_id ties back to the originating TaskBrief.
+  string task_id = 3;
+
+  // sprint_id of the last completed sprint before the reset. Empty if first sprint.
+  string last_sprint_id = 4;
+
+  // Masked key decisions recorded during the previous sprint (max 10).
+  // Each entry is a single masked sentence.
+  repeated string masked_key_decisions = 5;
+
+  // Propagated from TaskBrief for distributed trace correlation.
+  string correlation_id = 6;
+
+  // Autonomy level active at the time of the snapshot.
+  AutonomyLevel autonomy_level = 7;
+
+  // Whether this snapshot was triggered by a context utilisation threshold.
+  bool triggered_by_threshold = 8;
+
+  // Context utilisation ratio at the time of reset (0.0–1.0).
+  float context_utilisation = 9;
+}
+
+// ── HITLRequest ───────────────────────────────────────────────────────────────
+// Published to agent.harness.state when the HITL gateway submits an action
+// for human review. Operators consume this to render the approval UI.
+//
+// Corresponds to: src/agents/hitl_gateway.py::HITLRequest
+// Spec: specs/ai/hitl-hotl.md §3
+// ADR:  ADR-0011 (HITL/HOTL Human Oversight Model)
+//
+// IMPORTANT: action_parameters MUST NOT contain L1/L2 PII — enforce masking
+// before constructing this message. context_summary is likewise masked.
+
+message HITLRequestEnvelope {
+  // Unique request ID (UUID v4) assigned by the gateway.
+  string request_id = 1;
+
+  // Agent that proposed this action.
+  string agent_id = 2;
+
+  // Propagated for distributed trace correlation.
+  string correlation_id = 3;
+
+  // Action classification (e.g. write_file, deploy, send_notification).
+  string action_type = 4;
+
+  // JSON-serialised, PII-masked action parameters.
+  // Never embed raw user input — apply pii_filter.mask_dict() first.
+  string masked_action_parameters_json = 5;
+
+  // Computed risk score (0.0–1.0) from RiskScorer.
+  float risk_score = 6;
+
+  // Masked human-readable summary of the context for the approver.
+  string masked_context_summary = 7;
+
+  // ISO-8601 UTC creation timestamp.
+  string created_at = 8;
+
+  // ISO-8601 UTC expiry timestamp. After this the gateway auto-rejects.
+  string expires_at = 9;
+
+  // Current status.
+  HITLStatus status = 10;
+}
+
+// Status of a HITL request. Mirrors src/agents/hitl_gateway.py::HITLStatus.
+enum HITLStatus {
+  HITL_STATUS_UNSPECIFIED = 0;
+  HITL_STATUS_PENDING = 1;
+  HITL_STATUS_APPROVED = 2;
+  HITL_STATUS_REJECTED = 3;
+  HITL_STATUS_EXPIRED = 4;
+}
+
+// HITLDecisionEnvelope is published after an operator submits a decision.
+message HITLDecisionEnvelope {
+  string request_id = 1;
+  string agent_id = 2;
+  string correlation_id = 3;
+  HITLStatus decision = 4;
+  // Operator identifier (authenticated session ID — not raw user data).
+  string approver_id = 5;
+  // Operator rationale — stored in immutable audit log.
+  string rationale = 6;
+  // ISO-8601 UTC timestamp of the decision.
+  string decided_at = 7;
+  // Risk score from the original HITLRequestEnvelope (for audit correlation).
+  float risk_score = 8;
+}
+
+// ── AuditEvent ────────────────────────────────────────────────────────────────
+// Canonical audit record published to the audit.event.v1 Kafka topic and
+// written to the immutable PostgreSQL audit log.
+//
+// Corresponds to: src/shared/models.py::AuditEvent
+// Spec: specs/ai/guardrails.md §4
+// ADR:  ADR-0012 (PII Masking Strategy)
+//
+// This message is append-only — no delete or update path exists.
+
+message AuditEventEnvelope {
+  // Unique event ID (UUID v4).
+  string event_id = 1;
+
+  // ISO-8601 UTC timestamp.
+  string occurred_at = 2;
+
+  // Event category (e.g. agent.action.proposed, hitl.decision, sprint.completed).
+  string event_type = 3;
+
+  // Agent that generated this event. Empty for system-level events.
+  string agent_id = 4;
+
+  // Anonymised internal user identifier (L3). Never an L1/L2 identifier.
+  string user_id = 5;
+
+  // Verb describing what happened (e.g. write_file, deploy, decide).
+  string action = 6;
+
+  // Result of the action (completed | rejected | failed | pending_hitl).
+  string outcome = 7;
+
+  // JSON-serialised, PII-masked metadata. Apply mask_dict() before populating.
+  string masked_metadata_json = 8;
+
+  // W3C TraceContext trace_id for distributed trace correlation.
+  string trace_id = 9;
+
+  // Operator who approved or rejected (HITL events only).
+  string approver_id = 10;
+
+  // Risk score at the time of the event (0.0 if not applicable).
+  float risk_score = 11;
+
+  // Sprint ID if this event was generated within a harness sprint.
+  string sprint_id = 12;
+
+  // Correlation ID propagated from the originating TaskBrief.
+  string correlation_id = 13;
+}

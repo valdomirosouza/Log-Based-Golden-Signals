@@ -1,0 +1,77 @@
+# docs/eol-inventory.yaml
+# Reviewed quarterly. Owner: platform-team.
+# Update trigger: any dependency change or new EOL announcement.
+
+schema_version: "1.0"
+last_reviewed: "2026-05-31"
+next_review_due: "2026-08-29"
+owner: platform-team
+
+runtimes:
+  - name: Python
+    version: "3.13"
+    eol_date: "2029-10-31"
+    status: active # active | approaching (< 6 months) | eol
+    action_if_eol: Upgrade runtime and rebuild all Docker images
+
+  - name: Java (OpenJDK)
+    version: "21"
+    eol_date: "2031-09-30"
+    status: active
+    action_if_eol: Migrate to next LTS and update all Spring Boot dependencies
+
+  - name: Go
+    version: "1.24"
+    eol_date: "2026-08-01"
+    status: active # Upgraded from 1.23 (EOL); closes #31
+    action_if_eol: Upgrade Go toolchain and rebuild event-worker
+
+  - name: Node.js
+    version: "22"
+    eol_date: "2027-04-30"
+    status: active # Upgraded from 20 (EOL); closes #32
+    action_if_eol: Upgrade Node.js version in Dockerfile and devcontainer
+
+frameworks:
+  - name: FastAPI
+    version: "0.136.3"
+    eol_date: null # No fixed EOL — track major version deprecations
+    status: active
+    action_if_eol: Upgrade to latest stable
+
+  - name: Spring Boot
+    version: "3.4.5"
+    eol_date: "2026-11-21"
+    status: active # Upgraded from 3.3.5 (EOL); closes #33
+    action_if_eol: Migrate to next supported minor version
+
+  - name: Next.js
+    version: "15.2.4"
+    eol_date: "2026-10-01"
+    status: active # Upgraded from 14.2.29 (EOL); closes #34
+    action_if_eol: Upgrade to next major, verify HITL UI compatibility
+
+infrastructure:
+  - name: PostgreSQL
+    version: "16"
+    eol_date: "2028-11-09"
+    status: active
+    action_if_eol: Upgrade RDS engine version, run migration tests
+
+  - name: Redis
+    version: "7"
+    eol_date: "2027-01-31"
+    status: active # Tracking redis:7 (7.4.x); EOL 2027-01-31
+    action_if_eol: Upgrade ElastiCache engine version
+
+  - name: Apache Kafka
+    version: "3.8" # Confluent Platform 7.8.0 ships Apache Kafka 3.8
+    eol_date: "2026-10-01"
+    status: active # Upgraded from 3.7/CP 7.7.0 (EOL); closes #35
+    action_if_eol: Upgrade broker and Schema Registry versions together
+
+  - name: Kubernetes (EKS)
+    version: "1.32"
+    eol_date: "2026-12-28"
+    status: active # Upgraded from 1.31 (EOL); closes #36
+    action_if_eol: Upgrade EKS cluster version via Terraform, test Helm chart compatibility

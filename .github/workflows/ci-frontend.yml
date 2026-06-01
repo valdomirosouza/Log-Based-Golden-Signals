@@ -1,0 +1,192 @@
+name: CI — Frontend
+
+on:
+  push:
+    branches: ["main", "develop"]
+    paths:
+      - "frontend/**"
+      - "docs/api/openapi/**"
+      - ".github/workflows/ci-frontend.yml"
+  pull_request:
+    branches: ["main", "develop"]
+    paths:
+      - "frontend/**"
+      - "docs/api/openapi/**"
+      - ".github/workflows/ci-frontend.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "9"
+
+permissions:
+  contents: read
+
+jobs:
+  lint-frontend:
+    name: Frontend Lint & Type Check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [frontend] # add more apps here as they are created
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.4.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        working-directory: frontend/${{ matrix.app }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify TypeScript API client is up-to-date
+        run: |
+          npx @openapitools/openapi-generator-cli generate \
+            -i docs/api/openapi/v1/openapi.yaml \
+            -g typescript-fetch \
+            -o frontend/${{ matrix.app }}/src/lib/api \
+            --additional-properties=typescriptThreePlus=true,supportsES6=true
+          git diff --exit-code frontend/${{ matrix.app }}/src/lib/api/ || \
+            (echo "::error::TypeScript API client is out of date. Run 'make gen-api-client-ts APP=${{ matrix.app }}' and commit." && exit 1)
+
+      - name: Dependency vulnerability audit (blocks on HIGH or CRITICAL)
+        working-directory: frontend/${{ matrix.app }}
+        run: pnpm audit --audit-level=high
+        # Fails the build when any direct or transitive dependency has a HIGH or CRITICAL CVE.
+        # To suppress a specific advisory after review: add it to .pnpmfile.cjs or use
+        # pnpm audit --ignore-registry-errors with a documented justification in this file.
+
+      - name: ESLint
+        working-directory: frontend/${{ matrix.app }}
+        run: pnpm lint
+
+      - name: TypeScript type check
+        working-directory: frontend/${{ matrix.app }}
+        run: pnpm type-check
+
+      - name: Prettier format check
+        working-directory: frontend/${{ matrix.app }}
+        run: pnpm format --check
+
+  test-frontend-unit:
+    name: Frontend Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint-frontend
+    strategy:
+      matrix:
+        app: [frontend]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.4.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        working-directory: frontend/${{ matrix.app }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Jest unit tests with coverage
+        working-directory: frontend/${{ matrix.app }}
+        run: pnpm test:unit --coverage --coverageThreshold='{"global":{"lines":80}}'
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: frontend-${{ matrix.app }}-coverage
+          path: frontend/${{ matrix.app }}/coverage/
+
+  test-frontend-e2e:
+    name: Frontend E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+    needs: test-frontend-unit
+    strategy:
+      matrix:
+        app: [frontend]
+    services:
+      api-gateway:
+        image: ghcr.io/${{ github.repository_owner }}/api-gateway:latest
+        ports:
+          - 8000:8000
+        options: >-
+          --health-cmd "curl -sf http://localhost:8000/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.4.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        working-directory: frontend/${{ matrix.app }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: frontend/${{ matrix.app }}
+        run: pnpm playwright install --with-deps chromium
+
+      - name: Build Next.js app
+        working-directory: frontend/${{ matrix.app }}
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+
+      - name: Run Playwright E2E tests
+        working-directory: frontend/${{ matrix.app }}
+        run: pnpm e2e
+        env:
+          BASE_URL: http://localhost:3000
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: playwright-report-${{ matrix.app }}
+          path: frontend/${{ matrix.app }}/playwright-report/
+          retention-days: 7
+
+  build-frontend:
+    name: Frontend Build Image
+    runs-on: ubuntu-latest
+    needs: [test-frontend-unit]
+    strategy:
+      matrix:
+        app: [frontend]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build image (no push on PR)
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: frontend/${{ matrix.app }}
+          push: false
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.app }}:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_API_BASE_URL=https://api.staging.example.com
+            NEXT_PUBLIC_APP_ENV=staging
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

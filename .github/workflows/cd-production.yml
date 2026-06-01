@@ -1,0 +1,321 @@
+name: CD — Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "SemVer version to deploy (e.g. 1.2.3)"
+        required: true
+        type: string
+      strategy:
+        description: "Deploy strategy"
+        required: true
+        type: choice
+        options: [canary]
+        default: canary
+
+permissions:
+  contents: read
+
+jobs:
+  cab-check:
+    name: CAB Approval Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Validate change type label and RFC approval
+        run: |
+          python3 - << 'EOF'
+          import os, sys, re
+          import urllib.request, json
+
+          token = os.environ.get("GITHUB_TOKEN", "")
+          repo  = os.environ["GITHUB_REPOSITORY"]
+          sha   = os.environ["GITHUB_SHA"]
+
+          # Find the PR associated with this SHA
+          url = f"https://api.github.com/repos/{repo}/commits/{sha}/pulls"
+          req = urllib.request.Request(url, headers={
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+          })
+          with urllib.request.urlopen(req) as r:
+              prs = json.load(r)
+
+          if not prs:
+              print("No PR found for this SHA — assuming standard-change (workflow_dispatch).")
+              sys.exit(0)
+
+          pr = prs[0]
+          labels = {l["name"] for l in pr.get("labels", [])}
+          body   = pr.get("body", "") or ""
+
+          change_types = {"standard-change", "normal-change", "emergency-change"}
+          found = labels & change_types
+          if not found:
+              print(f"ERROR: PR #{pr['number']} has no change-type label. "
+                    f"Add one of: {change_types}")
+              sys.exit(1)
+
+          change_type = next(iter(found))
+          print(f"Change type: {change_type}")
+
+          if change_type in ("normal-change", "emergency-change"):
+              if not re.search(r"Refs:\s*RFC-\d+", body, re.IGNORECASE):
+                  print(f"ERROR: {change_type} requires 'Refs: RFC-NNNN' in PR body.")
+                  sys.exit(1)
+              print("RFC reference found.")
+
+          if change_type == "normal-change":
+              confirmed = os.environ.get("MANUAL_APPROVAL", "")
+              if confirmed != "confirmed":
+                  print("ERROR: normal-change requires MANUAL_APPROVAL=confirmed "
+                        "(set after CAB approves RFC).")
+                  sys.exit(1)
+              print("CAB approval confirmed.")
+
+          print("cab-check passed.")
+          EOF
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  check-error-budget:
+    name: Check Error Budget
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query remaining error budget
+        run: |
+          BUDGET=$(curl -sf "${{ vars.PROMETHEUS_URL }}/api/v1/query" \
+            --data-urlencode 'query=slo:error_budget_remaining:ratio{service="api-gateway"}' \
+            | jq -r '.data.result[0].value[1]')
+          echo "Remaining budget: $BUDGET"
+          python3 -c "import sys; sys.exit(0 if float('$BUDGET') >= 0.10 else 1)" || {
+            echo "ERROR: Error budget < 10%. Deploy blocked."
+            exit 1
+          }
+
+  deploy-canary:
+    name: Canary — 5%
+    runs-on: ubuntu-latest
+    needs: check-error-budget
+    environment: production
+    if: ${{ inputs.strategy == 'canary' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: "3.14.0"
+
+      - name: Deploy 5% canary
+        run: |
+          helm upgrade --install \
+            --namespace production \
+            --set image.tag=${{ inputs.version }} \
+            --set canary.enabled=true \
+            --set canary.weight=5 \
+            --wait --timeout 5m \
+            app ./infrastructure/helm/api-gateway \
+            --values infrastructure/helm/api-gateway/values-production.yaml
+
+      - name: Wait and check Golden Signals (5%)
+        run: |
+          echo "Waiting 15 minutes to observe canary metrics..."
+          sleep 900
+          ERROR_RATE=$(curl -sf "${{ vars.PROMETHEUS_URL }}/api/v1/query" \
+            --data-urlencode 'query=rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])' \
+            | jq -r '.data.result[0].value[1]')
+          P99=$(curl -sf "${{ vars.PROMETHEUS_URL }}/api/v1/query" \
+            --data-urlencode 'query=histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))' \
+            | jq -r '.data.result[0].value[1]')
+          echo "Error rate: $ERROR_RATE | p99 latency: $P99s"
+          python3 -c "
+          import sys
+          er = float('$ERROR_RATE')
+          p99 = float('$P99')
+          if er > 0.01 or p99 > 0.5:
+              print(f'Golden Signals gate FAILED at 5% canary: error_rate={er:.4f}, p99={p99:.3f}s')
+              sys.exit(1)
+          "
+
+  promote-canary-25:
+    name: Canary — 25%
+    runs-on: ubuntu-latest
+    needs: deploy-canary
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: "3.14.0"
+
+      - name: Promote to 25%
+        run: |
+          helm upgrade app ./infrastructure/helm/api-gateway \
+            --namespace production \
+            --values infrastructure/helm/api-gateway/values-production.yaml \
+            --reuse-values \
+            --set canary.weight=25 \
+            --wait --timeout 5m
+
+      - name: Wait and check Golden Signals (25%)
+        run: |
+          echo "Waiting 15 minutes..."
+          sleep 900
+          ERROR_RATE=$(curl -sf "${{ vars.PROMETHEUS_URL }}/api/v1/query" \
+            --data-urlencode 'query=rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])' \
+            | jq -r '.data.result[0].value[1]')
+          P99=$(curl -sf "${{ vars.PROMETHEUS_URL }}/api/v1/query" \
+            --data-urlencode 'query=histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))' \
+            | jq -r '.data.result[0].value[1]')
+          python3 -c "
+          import sys
+          er = float('$ERROR_RATE')
+          p99 = float('$P99')
+          if er > 0.01 or p99 > 0.5:
+              print(f'Golden Signals gate FAILED at 25% canary: error_rate={er:.4f}, p99={p99:.3f}s')
+              sys.exit(1)
+          "
+
+  promote-canary-100:
+    name: Full Deploy — 100%
+    runs-on: ubuntu-latest
+    needs: promote-canary-25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: "3.14.0"
+
+      - name: Promote to 100%
+        run: |
+          helm upgrade app ./infrastructure/helm/api-gateway \
+            --namespace production \
+            --values infrastructure/helm/api-gateway/values-production.yaml \
+            --set image.tag=${{ inputs.version }} \
+            --set canary.enabled=false \
+            --wait --timeout 10m
+
+  emit-dora-event:
+    name: Emit DORA Metrics
+    runs-on: ubuntu-latest
+    needs: [promote-canary-100]
+    if: always()
+    steps:
+      - name: Resolve first commit timestamp for this PR
+        id: first-commit
+        run: |
+          TIMESTAMP=$(gh pr view --json commits \
+            --jq '.commits | sort_by(.committedDate) | first | .committedDate' \
+            "${{ github.event.pull_request.number }}" 2>/dev/null \
+            || date -u +%s)
+          echo "timestamp=${TIMESTAMP}" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push DORA deployment event to Pushgateway
+        run: |
+          python3 - << 'EOF'
+          import os, time
+          from datetime import datetime, timezone
+          import urllib.request
+
+          outcome  = "success" if os.environ["DEPLOY_STATUS"] == "success" else "failure"
+          service  = "api-gateway"
+          env_name = "production"
+
+          try:
+              first_ts_raw = os.environ["FIRST_COMMIT_TIMESTAMP"]
+              if first_ts_raw.endswith("Z"):
+                  first_ts = datetime.fromisoformat(first_ts_raw.replace("Z", "+00:00")).timestamp()
+              else:
+                  first_ts = float(first_ts_raw)
+          except (ValueError, KeyError):
+              first_ts = time.time()
+
+          lead_time = max(0.0, time.time() - first_ts)
+          pushgateway = os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "")
+
+          metrics = (
+              "# HELP dora_deployments_total Total deployments by outcome\n"
+              "# TYPE dora_deployments_total counter\n"
+              f'dora_deployments_total{{service="{service}",environment="{env_name}",outcome="{outcome}"}} 1\n'
+              "# HELP dora_lead_time_seconds Lead time from first commit to production deploy\n"
+              "# TYPE dora_lead_time_seconds histogram\n"
+              f'dora_lead_time_seconds_sum{{service="{service}"}} {lead_time:.2f}\n'
+              f'dora_lead_time_seconds_count{{service="{service}"}} 1\n'
+          )
+
+          if pushgateway:
+              data = metrics.encode()
+              req = urllib.request.Request(
+                  f"{pushgateway}/metrics/job/dora/instance/{service}",
+                  data=data, method="POST",
+                  headers={"Content-Type": "text/plain"},
+              )
+              with urllib.request.urlopen(req) as r:
+                  print(f"Pushgateway: HTTP {r.status}")
+          else:
+              print("PROMETHEUS_PUSHGATEWAY_URL not set — metrics logged only.")
+
+          print(f"DORA event: outcome={outcome}, lead_time={lead_time:.0f}s")
+          EOF
+        env:
+          DEPLOY_STATUS: ${{ needs.promote-canary-100.result }}
+          FIRST_COMMIT_TIMESTAMP: ${{ steps.first-commit.outputs.timestamp }}
+          PROMETHEUS_PUSHGATEWAY_URL: ${{ vars.PROMETHEUS_PUSHGATEWAY_URL }}
+
+  record-change-evidence:
+    name: Record Change Evidence
+    runs-on: ubuntu-latest
+    needs: [promote-canary-100, emit-dora-event]
+    if: always()
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: true
+
+      - name: Append deploy record to docs/change-log/
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          STATUS="${{ needs.promote-canary-100.result }}"
+          OUTCOME=$([ "$STATUS" = "success" ] && echo "success" || echo "failure")
+          FILE="docs/change-log/${DATE}.yaml"
+
+          mkdir -p docs/change-log
+
+          cat >> "$FILE" << YAML
+          - timestamp: "${TIMESTAMP}"
+            event: deploy
+            deployer: "${{ github.actor }}"
+            service: "api-gateway"
+            version: "${{ inputs.version }}"
+            environment: "production"
+            outcome: "${OUTCOME}"
+            image_digest: "${{ vars.IMAGE_DIGEST || 'unknown' }}"
+            sbom_hash: "${{ vars.SBOM_HASH || 'unknown' }}"
+            change_type: "${{ vars.CHANGE_TYPE || 'standard-change' }}"
+          YAML
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "docs/change-log/${DATE}.yaml"
+          git diff --cached --quiet || git commit -m "chore(change-log): record deploy ${{ inputs.version }} [skip ci]"
+          git push
+
+  rollback-on-failure:
+    name: Auto Rollback
+    runs-on: ubuntu-latest
+    needs: [deploy-canary, promote-canary-25, promote-canary-100]
+    if: failure()
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Execute rollback
+        run: bash infrastructure/scripts/deploy/rollback.sh --env production

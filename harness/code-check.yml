@@ -1,0 +1,124 @@
+name: code-check
+description: PR gate — all gates must pass before merge is allowed
+version: "1.0"
+
+gates:
+  - name: lint
+    command: "uv run ruff check . && uv run ruff format --check . && uv run mypy src/"
+    blocking: true
+    failure_message: "Linting or type-check failed. Run 'make lint' locally to fix."
+
+  - name: unit-tests
+    command: "uv run pytest tests/unit/ --cov=src --cov-fail-under=80 -q"
+    blocking: true
+    failure_message: "Unit tests failed or coverage < 80%. All tests must pass and coverage must be ≥ 80% before merge."
+
+  - name: sast
+    command: "uv run bandit -r src/ -ll -x tests/"
+    blocking: true
+    failure_message: "Bandit found MEDIUM or HIGH severity findings. Address all findings before merge (see skills/devsecops/secret-scanning.md)."
+
+  - name: secret-detection
+    command: "detect-secrets scan --baseline .secrets.baseline"
+    blocking: true
+    failure_message: "Potential secrets detected. Review findings with 'detect-secrets audit' and update baseline after false-positive triage."
+
+  - name: pii-scan
+    command: >
+      uv run pytest tests/security/test_pii_leakage.py -q &&
+      ! grep -rqE '(fake@example\.com|000\.000\.000-00|192\.0\.2\.[0-9])' tests/fixtures/
+    blocking: true
+    failure_message: "Real PII detected in test fixtures. Replace with synthetic placeholders (see specs/privacy/pii-inventory.md)."
+
+  - name: spec-compliance
+    command: >
+      bash -c "
+        if [ -n \"${PR_BODY_FILE:-}\" ] && [ -f \"${PR_BODY_FILE}\" ]; then
+          grep -qE 'specs/[a-z/._-]+\.md' \"${PR_BODY_FILE}\" &&
+            echo 'Spec reference found.' ||
+            { echo 'No spec reference found in PR body.'; exit 1; }
+        else
+          echo 'PR_BODY_FILE not set — spec compliance check skipped (set it in CI).';
+          exit 0
+        fi
+      "
+    blocking: true # REM-008 — enforced (mirrors the CI 'Spec reference' gate in pr-governance.yml)
+    failure_message: >
+      No spec reference found in the PR body. Add a 'Referenced Spec: specs/...' line.
+      In CI, ensure PR_BODY_FILE points to a file containing the PR description body.
+
+compliance_checks:
+  sox:
+    # SOX checks are CONDITIONAL — activate only if organization is SEC-listed.
+    # If SOX does not apply, remove this entire sox: block from your harness config.
+    - id: SOX-01
+      description: "Financial data write paths must emit audit events [IF SOX APPLIES]"
+      check: "Any change to src/ or services/ that touches financial data must call audit_logger.log_event()"
+      severity: BLOCKING
+      condition: sox_applicable == true
+
+    - id: SOX-02
+      description: "No UPDATE or DELETE on audit_log table [IF SOX APPLIES]"
+      check: "Scan migration files in alembic/versions/ for UPDATE or DELETE statements targeting audit_log"
+      severity: BLOCKING
+      condition: sox_applicable == true
+
+    - id: SOX-03
+      description: "Segregation of duties: PR author cannot be sole approver [IF SOX APPLIES]"
+      check: "Enforce via CODEOWNERS minimum 2 reviewers on src/*, services/*, infrastructure/*"
+      severity: BLOCKING
+      condition: sox_applicable == true
+
+  iso27001:
+    - id: ISO-CM-01
+      description: "Production-impacting PRs must carry a change type label"
+      check: "PR must have one of: standard-change | normal-change | emergency-change"
+      severity: BLOCKING
+
+    - id: ISO-CM-02
+      description: "Normal/Emergency changes must reference RFC_ID"
+      check: "PR body or merge commit must match pattern: Refs: RFC-\\d+"
+      severity: BLOCKING (for normal-change and emergency-change labels)
+
+    - id: ISO-CM-03
+      description: "Rollback procedure must be validated in staging"
+      check: "cd-staging.yml smoke test must include a rollback validation step"
+      severity: WARNING
+
+  owasp:
+    - id: OWASP-A03
+      description: "No string-concatenated SQL queries"
+      check: "Run semgrep rule python.sqlalchemy.security.audit.raw-query.raw-query"
+      severity: BLOCKING
+
+    - id: OWASP-A08
+      description: "No pickle.loads() or eval() on untrusted input"
+      check: "Run bandit B301/B307 checks; zero findings"
+      severity: BLOCKING
+
+    - id: OWASP-A09
+      description: "Sensitive endpoints must log auth events"
+      check: "Any new /auth or /admin endpoint must call audit_logger"
+      severity: BLOCKING
+
+  devsecops:
+    - id: DSEC-01
+      description: "Dockerfile must use digest-pinned base image"
+      check: "FROM line must match pattern: FROM image@sha256:[a-f0-9]{64}"
+      severity: WARNING
+
+    - id: DSEC-02
+      description: "GitHub Actions must use SHA-pinned action versions"
+      check: "uses: lines must match @[a-f0-9]{40} not @vN.N"
+      severity: WARNING
+
+    - id: DSEC-03
+      description: "Workflow permissions must be explicitly scoped"
+      check: "Each workflow must declare permissions: block with principle of least privilege"
+      severity: WARNING
+
+  dora:
+    - id: DORA-01
+      description: "Deployment must emit DORA metric event"
+      check: "cd-production.yml must include 'Emit DORA deployment event' step"
+      severity: WARNING

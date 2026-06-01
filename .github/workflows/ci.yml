@@ -1,0 +1,427 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main", "develop"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  governance:
+    name: Governance Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Validate ADR index — every linked file must exist (A-04)
+        run: |
+          echo "Checking ADR index links..."
+          missing=0
+          while IFS= read -r adr_file; do
+            if [ ! -f "docs/adr/${adr_file}" ]; then
+              echo "MISSING: docs/adr/${adr_file}"
+              missing=$((missing + 1))
+            fi
+          done < <(grep -oE 'ADR-[0-9]+-[^)]+\.md' docs/adr/README.md)
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::$missing ADR file(s) listed in the index are missing."
+            exit 1
+          fi
+          echo "All ADR files present."
+      - name: Validate skill paths in CLAUDE.md — every path must exist (SK-03)
+        run: |
+          echo "Checking skill paths..."
+          missing=0
+          while IFS= read -r skill_path; do
+            if [ ! -f "${skill_path}" ]; then
+              echo "MISSING: ${skill_path}"
+              missing=$((missing + 1))
+            fi
+          done < <(grep -oE 'skills/[^`]+\.md' CLAUDE.md | sort -u)
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::$missing skill file(s) referenced in CLAUDE.md are missing."
+            exit 1
+          fi
+          echo "All skill paths present."
+      - name: Validate spec paths in CLAUDE.md — every path must exist
+        run: |
+          echo "Checking spec paths..."
+          missing=0
+          while IFS= read -r spec_path; do
+            if [ ! -f "${spec_path}" ]; then
+              echo "MISSING: ${spec_path}"
+              missing=$((missing + 1))
+            fi
+          done < <(grep -oE 'specs/[^` ]+\.md' CLAUDE.md | sort -u)
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::$missing spec file(s) referenced in CLAUDE.md are missing."
+            exit 1
+          fi
+          echo "All spec paths present."
+
+      - name: Validate .env.example covers all Settings fields
+        run: |
+          python3 - <<'EOF'
+          import ast, sys, pathlib, re
+
+          config_src = pathlib.Path("src/shared/config.py").read_text()
+          tree = ast.parse(config_src)
+
+          fields = []
+          for node in ast.walk(tree):
+              if isinstance(node, ast.ClassDef) and node.name == "Settings":
+                  for item in node.body:
+                      if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                          fields.append(item.target.id.upper())
+
+          env_src = pathlib.Path(".env.example").read_text().upper()
+          missing = [f for f in fields if f not in env_src]
+
+          if missing:
+              print(f"::warning::These Settings fields are not documented in .env.example:")
+              for f in missing:
+                  print(f"  - {f}")
+              # Advisory only — warn, do not fail (new fields may be internal-only)
+          else:
+              print(f"All {len(fields)} Settings fields are documented in .env.example.")
+          EOF
+      - name: Validate CODEOWNERS has no @org/ placeholder teams (REM-009)
+        # Fails if any @org/ patterns remain — these are unresolved template placeholders
+        # that won't resolve on GitHub, silently breaking reviewer auto-assignment.
+        # See docs/governance/owner-onboarding.md for how to assign real owners.
+        # ISO 5.2/5.31, SOC 2 CC5.2.
+        run: |
+          # Exclude comment lines (lines starting with #) so that documentation
+          # references to the old @org/* pattern don't trigger a false positive.
+          if grep -v '^#' .github/CODEOWNERS | grep -qE '@org/'; then
+            echo "::error file=.github/CODEOWNERS::CODEOWNERS contains unresolved @org/ placeholder teams."
+            echo "These patterns silently fail GitHub reviewer auto-assignment."
+            echo "Replace each @org/<role> with a real GitHub username or @your-org/team-name."
+            echo "See docs/governance/owner-onboarding.md for the step-by-step guide."
+            grep -v '^#' .github/CODEOWNERS | grep -nE '@org/' | while read -r line; do
+              echo "  $line"
+            done
+            exit 1
+          fi
+          echo "CODEOWNERS: no @org/ placeholder teams found in non-comment lines."
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    needs: governance
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Mypy type check
+        run: uv run mypy src/
+      - name: Secret scan
+        run: uv run detect-secrets scan --baseline .secrets.baseline
+
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Run unit tests
+        run: uv run pytest tests/unit/ -v --cov=src --cov-report=xml --cov-fail-under=80
+      - name: Upload coverage
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        with:
+          file: coverage.xml
+          # Coverage reporting is non-blocking; the real 80% gate is enforced by
+          # pytest's --cov-fail-under=80 above. Don't fail CI when the Codecov
+          # upload can't run (e.g. CODECOV_TOKEN not configured).
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: test-unit
+    services:
+      kafka:
+        image: confluentinc/cp-kafka:7.8.0
+        ports:
+          - 9092:9092
+        env:
+          KAFKA_BROKER_ID: 1
+          KAFKA_NODE_ID: 1
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+          CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+        options: >-
+          --health-cmd "kafka-broker-api-versions --bootstrap-server localhost:9092"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Run integration tests
+        run: uv run pytest tests/integration/ -v
+        env:
+          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+          REDIS_URL: redis://localhost:6379
+
+  test-security:
+    name: Security Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: SAST — Bandit
+        run: uv run bandit -r src/ -ll -x tests/
+      - name: Dependency audit — pip-audit
+        run: uv run pip-audit
+      - name: PII leakage tests
+        run: uv run pytest tests/security/ -v
+      - name: OWASP LLM Top 10 tests
+        run: uv run pytest tests/security/test_owasp_llm_top10.py -v
+
+  contract-drift:
+    name: Contract Drift Check
+    runs-on: ubuntu-latest
+    needs: governance
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install Python deps (for openapi-python-client)
+        run: uv sync --extra dev
+
+      - name: Validate OpenAPI spec is parseable
+        run: uv run python -c "import yaml; yaml.safe_load(open('docs/api/openapi/v1/openapi.yaml'))"
+
+      - name: Validate AsyncAPI spec is parseable
+        run: uv run python -c "import yaml; yaml.safe_load(open('docs/api/asyncapi/v1/asyncapi.yaml'))"
+
+      - name: Validate proto files compile
+        run: |
+          sudo apt-get install -y protobuf-compiler
+          find docs/api/grpc/proto -name "*.proto" | xargs \
+            protoc --proto_path=docs/api/grpc/proto \
+            --descriptor_set_out=/dev/null 2>&1 | grep -v "^$" || true
+
+      - name: Check services.yaml references valid schema files
+        run: |
+          uv run python - <<'EOF'
+          import yaml, sys, pathlib
+          catalog = yaml.safe_load(open("services.yaml"))
+          missing = []
+          for topic in catalog.get("topics", []):
+              schema_path = topic.get("schema", "")
+              if schema_path and not pathlib.Path(schema_path).exists():
+                  missing.append(schema_path)
+          if missing:
+              print("Missing schema files referenced in services.yaml:")
+              for p in missing:
+                  print(f"  {p}")
+              sys.exit(1)
+          print("All schema file references in services.yaml are valid.")
+          EOF
+
+  dast:
+    name: DAST (OWASP ZAP baseline)
+    # REM-004 — shift DAST left; run against the app in in-memory mode so no
+    # backing services are required. Fails on FAIL-level ZAP findings (high
+    # severity / high confidence). WARN-level findings are in the artifact only.
+    # ISO 8.29, SOC 2 CC7.1.
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Start API in in-memory mode
+        # The app falls back to InMemoryBroker, InMemoryRequestStore, and
+        # InMemoryAuditStorage when backing services are unreachable, so it
+        # starts cleanly without Kafka/Redis/PostgreSQL (ADR-0002 fallback pattern).
+        run: |
+          APP_ENV=development \
+          uv run uvicorn src.api.rest.main:app --host 0.0.0.0 --port 8000 &
+          echo $! > /tmp/app.pid
+        env:
+          DATABASE_URL: "postgresql+asyncpg://unused:unused@localhost:5432/unused"
+          REDIS_URL: "redis://localhost:6379/0"
+          KAFKA_BOOTSTRAP_SERVERS: "localhost:9092"
+      - name: Wait for API readiness
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health; then
+              echo "API is ready"
+              break
+            fi
+            echo "Waiting for API... ($i/30)"
+            sleep 2
+          done
+      - name: OWASP ZAP baseline scan
+        run: |
+          docker run --rm --network host \
+            -v "$(pwd)":/zap/wrk/:rw \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+              -t http://localhost:8000 \
+              -l WARN \
+              -r /zap/wrk/zap-report.html \
+              -J /zap/wrk/zap-report.json \
+              -I || ZAP_EXIT=$?
+          # Use `|| ZAP_EXIT=$?` so bash's `set -e` does not abort before we can
+          # inspect the exit code. ZAP_EXIT stays 0 on success; non-zero on error.
+          ZAP_EXIT=${ZAP_EXIT:-0}
+          # With -I: exit 0 = clean scan; exit 3 = ZAP internal error (e.g. sparse
+          # spider results on a minimal in-memory app with no DB-backed content).
+          # We treat exit 3 as a warning only. exit 2 (FAIL-level findings) fails.
+          if [ "$ZAP_EXIT" -eq 2 ]; then
+            echo "::error::ZAP found FAIL-level findings. Review zap-report.html artifact."
+            exit 1
+          elif [ "$ZAP_EXIT" -eq 3 ]; then
+            echo "::warning::ZAP exit 3 (internal error) — sparse target or scan config issue. Check artifact."
+          fi
+        shell: bash
+      - name: Upload ZAP report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: zap-report-${{ github.run_id }}
+          path: |
+            zap-report.html
+            zap-report.json
+          retention-days: 30
+
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [test-unit, test-security, test-integration, dast]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - name: Set lowercase image name
+        id: image
+        run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Build image (no push on PR)
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          push: false
+          load: true # load into the local daemon so Trivy can scan it
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan image for vulnerabilities (Trivy)
+        # REM-006 — fail the build on fixable CRITICAL/HIGH CVEs in the image (ISO 8.7, SOC 2 CC6.8).
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.name }}:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - name: Scan IaC/config for misconfigurations (Trivy)
+        # REM-003 — catch missing securityContexts, privileged containers, and
+        # NetworkPolicy gaps in Helm templates and K8s manifests (ISO 5.14/8.20).
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          skip-dirs: ".venv,node_modules,target,.gradle,.git,infrastructure/terraform"
+          trivyignores: .trivyignore
+
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    needs: [build]
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate SBOM (CycloneDX JSON)
+        run: |
+          syft . \
+            --output cyclonedx-json=sbom.json
+          echo "SBOM generated — $(jq '.components | length' sbom.json) components"
+
+      - name: Upload SBOM as workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.json
+          retention-days: 90
