@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import uuid
 from contextlib import asynccontextmanager
@@ -8,13 +7,11 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from .models import LogBatch
+from .queue import publish
 from .signals import extract
 
 logger = logging.getLogger("ingestion_api")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
-
-_event_queue: asyncio.Queue = asyncio.Queue()
 
 
 @asynccontextmanager
@@ -53,7 +50,7 @@ async def ingest(request: Request) -> JSONResponse:
             from .models import LogEntry
             entry = LogEntry.model_validate(raw)
             event = extract(entry)
-            await _event_queue.put(event)
+            await publish(event)
             accepted += 1
         except (ValidationError, Exception) as exc:
             rejected += 1
