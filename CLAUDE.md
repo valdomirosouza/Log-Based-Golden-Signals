@@ -293,6 +293,20 @@ Step 10: UPDATE CHANGELOG.md with the change under the correct category.
 - **NEVER** merge with failing tests or linter violations.
 - **ALWAYS** update `CHANGELOG.md` with every production change.
 
+### 3.6 Issue Tracking Rules
+
+- **NEVER** write, edit, or delete any file — source code, configuration, tests, migrations, CI/CD workflows, Dockerfiles, documentation, or ADRs — without first creating a GitHub Issue that tracks the change.
+- **ALWAYS** record the issue number before starting work. Set `CURRENT_ISSUE=<number>` in your shell, or work on a branch named `type/NNN-description`.
+- **ALWAYS** include `Refs: #NNN` (or `Closes #NNN` / `Fixes #NNN`) in every commit message body.
+- **NEVER** use `--no-verify` to bypass the commit-msg hook that enforces issue references.
+- Exemptions: merge commits, revert commits, `chore(release):` version bumps.
+
+Enforcement:
+
+- `PreToolUse` Claude Code hook (`.claude/hooks/require-issue.sh`) blocks `Edit`/`Write`/`NotebookEdit` without an active issue.
+- `commit-msg` pre-commit hook (`.claude/hooks/require-issue-commit-msg.sh`) blocks commits without `#NNN`.
+- `pr-governance.yml` `issue-referenced` job blocks PRs without an issue link.
+
 ---
 
 ## 4. Skill Activation Table

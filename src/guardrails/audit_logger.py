@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from src.observability.logger import get_logger
 from src.shared.models import AuditEvent
@@ -115,15 +115,16 @@ class PostgresAuditStorage:
         self._pool = pool
         self._encryption = encryption
 
-    def _encrypt_metadata(self, metadata: dict) -> str:
+    def _encrypt_metadata(self, metadata: dict[str, Any]) -> str:
         payload = json.dumps(metadata)
         return self._encryption.encrypt(payload) if self._encryption else payload
 
-    def _decrypt_metadata(self, raw: str | None) -> dict:
+    def _decrypt_metadata(self, raw: str | None) -> dict[str, Any]:
         if not raw:
             return {}
         value = self._encryption.decrypt(raw) if self._encryption else raw
-        return json.loads(value)
+        result: dict[str, Any] = json.loads(value)
+        return result
 
     async def append(self, event: AuditEvent) -> None:
         async with self._pool.acquire() as conn:

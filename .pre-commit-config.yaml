@@ -47,3 +47,12 @@ repos:
     hooks:
       - id: bandit
         args: [-r, src/, -ll, -x, tests/]
+
+  # ── Issue reference — every commit must cite a GitHub Issue ──────────────────
+  - repo: local
+    hooks:
+      - id: require-issue-in-commit-msg
+        name: "Require GitHub Issue reference (#NNN) in commit message"
+        language: script
+        entry: .claude/hooks/require-issue-commit-msg.sh
+        stages: [commit-msg]

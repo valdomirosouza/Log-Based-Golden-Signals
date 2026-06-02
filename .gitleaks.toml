@@ -1,0 +1,13 @@
+title = "Log-Based Golden Signals — Gitleaks configuration"
+
+# ADR-0029: Gitleaks scans the full git history for real secrets.
+# This file records reviewed and accepted false positives only.
+
+[allowlist]
+  description = "Reviewed false positives"
+  paths = [
+    # .env.example is a committed documentation artifact — all values are
+    # illustrative placeholders (apppassword, devpassword, etc.) that are
+    # never used in production. Real secrets are injected via Vault (ADR-0008).
+    '''.env.example''',
+  ]
