@@ -13,6 +13,24 @@ Every entry must reference: Issue #, ADR # (if applicable), RFC # (if applicable
 
 ## [Unreleased]
 
+### Security
+
+- **`audit_events.metadata` encrypted at rest** — `PostgresAuditStorage` now accepts an `EncryptedField` and applies AES-256-GCM encryption to the `metadata` column before INSERT, with transparent decryption on SELECT. Passthrough path handles pre-existing plaintext rows (zero-downtime rollout). Wired in `main.py` alongside `HITLRedisStore`. Closes #25. ADR-0018.
+- **Non-root containers in `log-golden-signals/`** — Added `groupadd`/`useradd` + `USER appuser` (uid 1001) to `ingestion_api`, `analytics_api`, and `metrics_processor` Dockerfiles. Closes #28. ADR-0029.
+
+### Added
+
+- **Gitleaks CI gate** — New `gitleaks` job in `ci.yml` scans the full git history for secrets on every push; required by the `build` job. Installs Gitleaks v8.21.2 binary. Closes #26. ADR-0029.
+- **Checkov IaC security gate** — New `iac-scan` job in `ci.yml` runs Checkov on `infrastructure/` with `--hard-fail-on HIGH,CRITICAL`; required by the `build` job. Closes #27. ADR-0029.
+- **Issue-first guardrails** — Four enforcement layers preventing file changes without a linked GitHub Issue: Claude Code `PreToolUse` hook (`.claude/hooks/require-issue.sh`), `commit-msg` pre-commit hook (`.claude/hooks/require-issue-commit-msg.sh`), CLAUDE.md rule 3.6, and `pr-governance.yml` CI exemption narrowed from any `(ci)` scope to `chore(ci):` only. Closes #29.
+- **`.gitleaks.toml`** — Allowlists `.env.example` (a documentation template, not a secrets file) to suppress false positives from Gitleaks; includes justification comment referencing ADR-0008. Closes #30.
+- **Alembic migration `0006`** — Adds a PostgreSQL column comment on `audit_events.metadata` documenting the `enc:v1:` AES-256-GCM wire format for schema inspection tooling. Refs #25. ADR-0018.
+
+### Fixed
+
+- **`PostgresAuditStorage` mypy errors** — Changed bare `dict` to `dict[str, Any]` in `_encrypt_metadata` and `_decrypt_metadata`; bound `json.loads()` result to a typed local variable to satisfy `[no-any-return]` under strict mode. Closes #31.
+- **`pr-governance.yml` CI exemption** — Narrowed from `\w+(ci):` (any scope with `ci`) to `chore(ci):` only; `security(ci):` and `fix(ci):` PRs now require a GitHub Issue reference. Refs #29.
+
 ## [1.26.19] — 2026-06-01
 
 ### Fixed
