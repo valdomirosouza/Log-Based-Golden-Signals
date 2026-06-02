@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import time
 
 import redis.asyncio as aioredis
@@ -29,6 +30,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("metrics_processor")
 
 _stats = {"events_processed": 0, "events_dlq": 0, "lag": 0}
+_shutdown: asyncio.Event = asyncio.Event()
 
 
 async def _connect_redis() -> aioredis.Redis:
@@ -51,8 +53,9 @@ async def _connect_redis() -> aioredis.Redis:
 async def _ensure_consumer_group(r: aioredis.Redis) -> None:
     try:
         await r.xgroup_create(STREAM_NAME, GROUP_NAME, id="0", mkstream=True)
-    except Exception:
-        pass  # group already exists
+    except Exception as exc:
+        if "BUSYGROUP" not in str(exc):  # BUSYGROUP = group already exists, normal
+            logger.warning('{"service":"metrics_processor","msg":"consumer group creation error","error":"%s"}', exc)
 
 
 async def _process_loop(r: aioredis.Redis) -> None:
@@ -107,8 +110,12 @@ async def _process_loop(r: aioredis.Redis) -> None:
             for g in info:
                 if g.get("name") == GROUP_NAME:
                     _stats["lag"] = g.get("lag", 0) or 0
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug('{"service":"metrics_processor","msg":"lag update failed","error":"%s"}', exc)
+
+        if _shutdown.is_set():
+            logger.info('{"service":"metrics_processor","msg":"shutdown signal received, exiting loop"}')
+            return
 
 
 # ── HTTP /metrics endpoint ────────────────────────────────────────────────────
@@ -128,6 +135,10 @@ async def _run_http_server() -> None:
 
 
 async def main() -> None:
+    loop = asyncio.get_event_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, _shutdown.set)
+    logger.info('{"service":"metrics_processor","msg":"signal handlers registered"}')
     logger.info('{"service":"metrics_processor","msg":"starting"}')
     r = await _connect_redis()
     await _ensure_consumer_group(r)
