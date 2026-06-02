@@ -165,3 +165,31 @@ class TestDLQ:
             simulate_failure("msg-002", ValueError("boom"))
 
         assert "msg-002" not in dlq_written
+
+
+class TestAggregationEdgeCases:
+    def _make_redis(self):
+        r = AsyncMock()
+        r.incr = AsyncMock(return_value=1)
+        r.zadd = AsyncMock(return_value=1)
+        r.incrbyfloat = AsyncMock(return_value=0.0)
+        r.expire = AsyncMock(return_value=1)
+        r.sadd = AsyncMock(return_value=1)
+        return r
+
+    def test_aggregate_zero_bytes_sent_does_not_error(self):
+        """bytes_sent=0 must call incrbyfloat with 0 without raising."""
+        from metrics_processor.app.aggregator import aggregate
+        r = self._make_redis()
+        run(aggregate(r, {
+            "path": "/api/test",
+            "response_time_ms": 10.0,
+            "bytes_sent": 0,
+            "is_error": False,
+            "window_1m": 1748685600,
+            "window_5m": 1748685300,
+        }))
+        sat_calls = [c for c in r.incrbyfloat.call_args_list if "saturation" in c.args[0]]
+        assert len(sat_calls) == 2
+        for c in sat_calls:
+            assert c.args[1] == 0
