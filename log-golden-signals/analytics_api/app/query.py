@@ -2,12 +2,24 @@
 Reads aggregated metrics from Redis and computes analytics buckets.
 """
 
+import logging
 import os
+import re
 from typing import Any, Optional
 
 import redis.asyncio as aioredis
 
 from .percentiles import percentile
+
+logger = logging.getLogger("analytics_api.query")
+
+_VALID_PATH_RE = re.compile(r'^[a-zA-Z0-9_.~/:@-]+$')
+
+
+def validate_path(path: str) -> None:
+    """Raise ValueError if path contains characters unsafe for Redis keys."""
+    if not _VALID_PATH_RE.match(path):
+        raise ValueError(f"Invalid path: contains disallowed characters")
 
 SATURATION_BYTES_THRESHOLD = float(os.getenv("SATURATION_BYTES_THRESHOLD", "1_000_000"))
 _WINDOW_SECONDS = {"1m": 60, "5m": 300}
@@ -32,6 +44,7 @@ def _buckets_for_range(from_epoch: float, to_epoch: float, window: str) -> list[
 async def query_latency(
     r: aioredis.Redis, path: str, window: str, buckets: list[int]
 ) -> list[dict[str, Any]]:
+    validate_path(path)
     results = []
     for bucket in buckets:
         l_key = _key("latency", path, window, bucket)
@@ -42,7 +55,8 @@ async def query_latency(
 
         try:
             raw_values = await r.zrange(l_key, 0, -1, withscores=True)
-        except (aioredis.ConnectionError, aioredis.TimeoutError):
+        except (aioredis.ConnectionError, aioredis.TimeoutError) as exc:
+            logger.warning("Redis read error", extra={"bucket": bucket, "error": str(exc)})
             continue
 
         if not raw_values:
@@ -79,12 +93,14 @@ async def query_latency(
 async def query_traffic(
     r: aioredis.Redis, path: str, window: str, buckets: list[int]
 ) -> list[dict[str, Any]]:
+    validate_path(path)
     results = []
     for bucket in buckets:
         t_key = _key("traffic", path, window, bucket)
         try:
             val = await r.get(t_key)
-        except (aioredis.ConnectionError, aioredis.TimeoutError):
+        except (aioredis.ConnectionError, aioredis.TimeoutError) as exc:
+            logger.warning("Redis read error", extra={"bucket": bucket, "error": str(exc)})
             continue
         if val is None:
             continue
@@ -95,6 +111,7 @@ async def query_traffic(
 async def query_error(
     r: aioredis.Redis, path: str, window: str, buckets: list[int]
 ) -> list[dict[str, Any]]:
+    validate_path(path)
     results = []
     for bucket in buckets:
         e_key = _key("error", path, window, bucket)
@@ -102,7 +119,8 @@ async def query_error(
         try:
             errors = await r.get(e_key)
             total = await r.get(et_key)
-        except (aioredis.ConnectionError, aioredis.TimeoutError):
+        except (aioredis.ConnectionError, aioredis.TimeoutError) as exc:
+            logger.warning("Redis read error", extra={"bucket": bucket, "error": str(exc)})
             continue
         if total is None:
             continue
@@ -119,12 +137,14 @@ async def query_error(
 async def query_saturation(
     r: aioredis.Redis, path: str, window: str, buckets: list[int]
 ) -> list[dict[str, Any]]:
+    validate_path(path)
     results = []
     for bucket in buckets:
         s_key = _key("saturation", path, window, bucket)
         try:
             val = await r.get(s_key)
-        except (aioredis.ConnectionError, aioredis.TimeoutError):
+        except (aioredis.ConnectionError, aioredis.TimeoutError) as exc:
+            logger.warning("Redis read error", extra={"bucket": bucket, "error": str(exc)})
             continue
         if val is None:
             continue
