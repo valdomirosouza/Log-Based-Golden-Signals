@@ -1,15 +1,13 @@
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
 from fastapi.testclient import TestClient
-
 from ingestion_api.app.main import app
+from ingestion_api.app.models import LogEntry
 from ingestion_api.app.pii import mask_ip
 from ingestion_api.app.signals import extract
-from ingestion_api.app.models import LogEntry
 
 client = TestClient(app)
 
@@ -64,14 +62,10 @@ def test_ipv4_last_octet_masked():
 
 
 def test_ipv6_last_80_bits_masked():
-    result = mask_ip("2001:db8::1")
-    addr = result
+    addr = mask_ip("2001:db8::1")
     # last 80 bits zeroed → last 5 hextets should be 0
-    parts = addr.split(":")
-    # expand abbreviated IPv6
     import ipaddress
-    expanded = ipaddress.IPv6Address(addr).exploded
-    hextets = expanded.split(":")
+    hextets = ipaddress.IPv6Address(addr).exploded.split(":")
     assert all(h == "0000" for h in hextets[3:])
 
 

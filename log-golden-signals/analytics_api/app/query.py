@@ -5,7 +5,7 @@ Reads aggregated metrics from Redis and computes analytics buckets.
 import logging
 import os
 import re
-from typing import Any, Optional
+from typing import Any
 
 import redis.asyncio as aioredis
 
@@ -19,7 +19,7 @@ _VALID_PATH_RE = re.compile(r'^[a-zA-Z0-9_.~/:@-]+$')
 def validate_path(path: str) -> None:
     """Raise ValueError if path contains characters unsafe for Redis keys."""
     if not _VALID_PATH_RE.match(path):
-        raise ValueError(f"Invalid path: contains disallowed characters")
+        raise ValueError("Invalid path: contains disallowed characters")
 
 SATURATION_BYTES_THRESHOLD = float(os.getenv("SATURATION_BYTES_THRESHOLD", "1_000_000"))
 _WINDOW_SECONDS = {"1m": 60, "5m": 300}
@@ -156,7 +156,7 @@ async def query_saturation(
     return results
 
 
-def summarise_latency(buckets: list[dict]) -> Optional[dict]:
+def summarise_latency(buckets: list[dict]) -> dict | None:
     if not buckets:
         return None
     all_p50 = [b["p50_ms"] for b in buckets]

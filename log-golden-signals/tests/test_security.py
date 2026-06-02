@@ -1,11 +1,11 @@
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, patch
+
 from fastapi.testclient import TestClient
 
 VALID_INGESTION_KEY = "test-ingestion-key-123"
@@ -79,8 +79,9 @@ class TestRateLimiting:
         mock_r.ttl = AsyncMock(return_value=45)
 
         async def run():
-            from ingestion_api.app.rate_limit import check_rate_limit
             import hashlib
+
+            from ingestion_api.app.rate_limit import check_rate_limit
             key_hash = hashlib.sha256(b"test-key").hexdigest()
             return await check_rate_limit(mock_r, key_hash)
 
@@ -94,8 +95,9 @@ class TestRateLimiting:
         mock_r.expire = AsyncMock(return_value=1)
 
         async def run():
-            from ingestion_api.app.rate_limit import check_rate_limit
             import hashlib
+
+            from ingestion_api.app.rate_limit import check_rate_limit
             key_hash = hashlib.sha256(b"test-key").hexdigest()
             return await check_rate_limit(mock_r, key_hash)
 
@@ -167,8 +169,6 @@ class TestAuditLog:
         """Verify that _write_audit is called during POST /ingestion."""
         import ingestion_api.app.main as main_mod
         audit_calls = []
-
-        original = main_mod._write_audit
 
         async def mock_audit(*args, **kwargs):
             audit_calls.append(args)

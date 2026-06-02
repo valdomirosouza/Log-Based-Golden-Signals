@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -12,7 +11,7 @@ class LogEntry(BaseModel):
     response_time_ms: float = Field(ge=0.0)
     bytes_sent: int = Field(ge=0)
     client_ip: str
-    backend_name: Optional[str] = None
+    backend_name: str | None = None
 
 
 class LogBatch(BaseModel):
@@ -22,7 +21,7 @@ class LogBatch(BaseModel):
     @classmethod
     def validate_batch_size(cls, v: list) -> list:
         if not 1 <= len(v) <= 1000:
-            raise ValueError("batch must contain 1–1000 entries")
+            raise ValueError("batch must contain 1-1000 entries")
         return v
 
 
@@ -34,7 +33,7 @@ class GoldenSignalEvent(BaseModel):
     response_time_ms: float
     bytes_sent: int
     client_ip_masked: str
-    backend_name: Optional[str] = None
+    backend_name: str | None = None
     is_error: bool
     window_1m: int
     window_5m: int

@@ -19,7 +19,7 @@ import random
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 INGESTION_URL = os.getenv("INGESTION_URL", "http://localhost:8000")
 BATCH_SIZE = 100
@@ -83,7 +83,7 @@ def send_batch(entries: list) -> dict:
 
 def main() -> None:
     random.seed(SEED)
-    base_time = datetime(2026, 5, 31, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 5, 31, 10, 0, 0, tzinfo=UTC)
 
     entries = [make_entry(base_time, i) for i in range(TOTAL)]
 
@@ -106,7 +106,7 @@ def main() -> None:
             print(f"ERROR sending batch {batch_start}: {exc}", file=sys.stderr)
             total_rejected += len(batch)
 
-    print(f"\n=== Seed Summary ===")
+    print("\n=== Seed Summary ===")
     print(f"Total entries:  {TOTAL}")
     print(f"Total accepted: {total_accepted}")
     print(f"Total rejected: {total_rejected}")

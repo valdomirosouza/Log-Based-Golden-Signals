@@ -1,13 +1,12 @@
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from fastapi.testclient import TestClient
+from unittest.mock import AsyncMock, patch
 
+import pytest
+from fastapi.testclient import TestClient
 
 # ── Percentile computation ────────────────────────────────────────────────────
 
@@ -55,14 +54,15 @@ def _make_mock_redis():
 
 class TestAnalyticsAPI:
     def setup_method(self):
-        from analytics_api.app.main import app
         from analytics_api.app import redis_client
+        from analytics_api.app.main import app
         self.app = app
         self.redis_client = redis_client
 
     def _patch_redis(self, mock_r):
         """Patch get_redis in both the main module and the redis_client module."""
         from unittest.mock import patch
+
         import analytics_api.app.main as main_mod
         return patch.object(main_mod, "get_redis", AsyncMock(return_value=mock_r))
 

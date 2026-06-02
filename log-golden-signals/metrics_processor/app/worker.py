@@ -11,7 +11,6 @@ import json
 import logging
 import os
 import signal
-import time
 
 import redis.asyncio as aioredis
 from aiohttp import web
@@ -43,8 +42,10 @@ async def _connect_redis() -> aioredis.Redis:
             return r
         except Exception as exc:
             logger.warning(
-                '{"service":"metrics_processor","msg":"redis unavailable, retrying in %ds","error":"%s"}',
-                delay, exc,
+                '{"service":"metrics_processor","msg":"redis unavailable, retrying in %ds",'
+                '"error":"%s"}',
+                delay,
+                exc,
             )
             await asyncio.sleep(delay)
             delay = min(delay * 2, 30)
@@ -55,7 +56,11 @@ async def _ensure_consumer_group(r: aioredis.Redis) -> None:
         await r.xgroup_create(STREAM_NAME, GROUP_NAME, id="0", mkstream=True)
     except Exception as exc:
         if "BUSYGROUP" not in str(exc):  # BUSYGROUP = group already exists, normal
-            logger.warning('{"service":"metrics_processor","msg":"consumer group creation error","error":"%s"}', exc)
+            logger.warning(
+                '{"service":"metrics_processor","msg":"consumer group creation error",'
+                '"error":"%s"}',
+                exc,
+            )
 
 
 async def _process_loop(r: aioredis.Redis) -> None:
@@ -73,7 +78,11 @@ async def _process_loop(r: aioredis.Redis) -> None:
             logger.error('{"service":"metrics_processor","msg":"redis error","error":"%s"}', exc)
             continue
         except (aioredis.ConnectionError, aioredis.TimeoutError) as exc:
-            logger.error('{"service":"metrics_processor","msg":"connection lost, reconnecting","error":"%s"}', exc)
+            logger.error(
+                '{"service":"metrics_processor","msg":"connection lost, reconnecting",'
+                '"error":"%s"}',
+                exc,
+            )
             r = await _connect_redis()
             await _ensure_consumer_group(r)
             continue
@@ -94,11 +103,21 @@ async def _process_loop(r: aioredis.Redis) -> None:
                     count = retry_counts.get(msg_id, 0) + 1
                     retry_counts[msg_id] = count
                     logger.error(
-                        '{"service":"metrics_processor","msg":"processing error","msg_id":"%s","retry":%d,"error":"%s"}',
-                        msg_id, count, exc,
+                        '{"service":"metrics_processor","msg":"processing error",'
+                        '"msg_id":"%s","retry":%d,"error":"%s"}',
+                        msg_id,
+                        count,
+                        exc,
                     )
                     if count >= MAX_RETRIES:
-                        await r.xadd(DLQ_KEY, {"original_id": msg_id, "data": fields.get("data", ""), "error": str(exc)})
+                        await r.xadd(
+                            DLQ_KEY,
+                            {
+                                "original_id": msg_id,
+                                "data": fields.get("data", ""),
+                                "error": str(exc),
+                            },
+                        )
                         await r.xack(STREAM_NAME, GROUP_NAME, msg_id)
                         await r.xdel(STREAM_NAME, msg_id)
                         _stats["events_dlq"] += 1
@@ -111,10 +130,15 @@ async def _process_loop(r: aioredis.Redis) -> None:
                 if g.get("name") == GROUP_NAME:
                     _stats["lag"] = g.get("lag", 0) or 0
         except Exception as exc:
-            logger.debug('{"service":"metrics_processor","msg":"lag update failed","error":"%s"}', exc)
+            logger.debug(
+                '{"service":"metrics_processor","msg":"lag update failed","error":"%s"}',
+                exc,
+            )
 
         if _shutdown.is_set():
-            logger.info('{"service":"metrics_processor","msg":"shutdown signal received, exiting loop"}')
+            logger.info(
+                '{"service":"metrics_processor","msg":"shutdown signal received, exiting loop"}'
+            )
             return
 
 
@@ -129,9 +153,12 @@ async def _run_http_server() -> None:
     app.router.add_get("/metrics", _handle_metrics)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", METRICS_PORT)
+    site = web.TCPSite(runner, "0.0.0.0", METRICS_PORT)  # noqa: S104
     await site.start()
-    logger.info('{"service":"metrics_processor","msg":"metrics server started","port":%d}', METRICS_PORT)
+    logger.info(
+        '{"service":"metrics_processor","msg":"metrics server started","port":%d}',
+        METRICS_PORT,
+    )
 
 
 async def main() -> None:

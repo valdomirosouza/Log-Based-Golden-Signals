@@ -9,8 +9,8 @@ import json
 import os
 import sys
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 
 INGESTION_URL = os.getenv("INGESTION_URL", "http://localhost:8000")
 ANALYTICS_URL = os.getenv("ANALYTICS_URL", "http://localhost:8001")

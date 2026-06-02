@@ -1,11 +1,10 @@
 import os
-from typing import Optional
 
 import redis.asyncio as aioredis
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
-_redis: Optional[aioredis.Redis] = None
+_redis: aioredis.Redis | None = None
 
 
 async def get_redis() -> aioredis.Redis:

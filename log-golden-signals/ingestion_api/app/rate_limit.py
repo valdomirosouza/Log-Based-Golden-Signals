@@ -4,7 +4,6 @@ Uses Redis INCR + EXPIRE for an atomic per-minute counter.
 """
 
 import time
-from typing import Optional
 
 import redis.asyncio as aioredis
 

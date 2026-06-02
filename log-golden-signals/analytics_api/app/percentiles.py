@@ -20,10 +20,9 @@ Algorithm (no external stats libs):
 """
 
 import math
-from typing import Optional
 
 
-def percentile(sorted_values: list[float], p: float) -> Optional[float]:
+def percentile(sorted_values: list[float], p: float) -> float | None:
     """Compute the p-th percentile of a pre-sorted list (0 ≤ p ≤ 100)."""
     n = len(sorted_values)
     if n == 0:

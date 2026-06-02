@@ -1,5 +1,5 @@
 import os
-from datetime import timezone
+from datetime import UTC
 
 from .models import GoldenSignalEvent, LogEntry
 from .pii import mask_ip
@@ -19,7 +19,7 @@ def _epoch_bucket(ts_epoch: float, window_seconds: int) -> int:
 def extract(entry: LogEntry) -> GoldenSignalEvent:
     ts = entry.timestamp
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
+        ts = ts.replace(tzinfo=UTC)
     epoch = ts.timestamp()
 
     return GoldenSignalEvent(

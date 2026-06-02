@@ -7,7 +7,6 @@ import asyncio
 import json
 import logging
 import os
-from typing import Optional
 
 import redis.asyncio as aioredis
 
@@ -18,11 +17,11 @@ STREAM_NAME = "golden-signals:events"
 
 logger = logging.getLogger("ingestion_api.queue")
 
-_redis: Optional[aioredis.Redis] = None
+_redis: aioredis.Redis | None = None
 _fallback_queue: asyncio.Queue = asyncio.Queue()
 
 
-async def get_redis() -> Optional[aioredis.Redis]:
+async def get_redis() -> aioredis.Redis | None:
     global _redis
     if _redis is None:
         try:

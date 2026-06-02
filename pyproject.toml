@@ -87,6 +87,10 @@ ignore = [
 "tests/**" = ["S", "T20", "E501", "B017", "RUF002", "RUF003"]
 "alembic/**" = ["S608"]  # Dynamic SQL is standard in Alembic migrations
 "scaffold/scaffold.py" = ["T201"]  # CLI tool — print() is its user-facing output
+# log-golden-signals is a self-contained sub-project with its own Docker stack.
+# Its test suite is a standalone runner (not pytest), so T20/S/RUF001 are intentional.
+"log-golden-signals/tests/**" = ["S", "T20", "E501", "B017", "RUF001", "RUF002", "RUF003"]
+"log-golden-signals/scripts/**" = ["S", "T20", "E501", "RUF002"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]

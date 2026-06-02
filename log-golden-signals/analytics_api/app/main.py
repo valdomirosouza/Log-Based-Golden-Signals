@@ -2,9 +2,8 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Optional
+from datetime import UTC, datetime
+from enum import StrEnum
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -32,7 +31,7 @@ _HITL_P99_THRESHOLD_MS = 500.0
 _HITL_ERROR_RATE_THRESHOLD = 0.05
 
 
-class Signal(str, Enum):
+class Signal(StrEnum):
     latency = "latency"
     traffic = "traffic"
     error = "error"
@@ -48,7 +47,7 @@ app = FastAPI(title="Analytics API", lifespan=lifespan)
 app.add_middleware(BaseHTTPMiddleware, dispatch=api_key_middleware)
 
 
-def _governance(summary: Optional[dict]) -> dict:
+def _governance(summary: dict | None) -> dict:
     hitl = False
     if summary:
         p99 = summary.get("p99_ms", 0) or 0
@@ -95,7 +94,7 @@ async def ready():
         await r.ping()
         return {"status": "ready"}
     except Exception:
-        raise HTTPException(status_code=503, detail="Not ready")
+        raise HTTPException(status_code=503, detail="Not ready") from None
 
 
 @app.get("/analytics/health")
@@ -119,7 +118,7 @@ async def analytics_paths():
         return {"paths": sorted(paths)}
     except Exception as exc:
         logger.error("Redis unavailable", extra={"error": str(exc)})
-        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
 
 
 @app.get("/audit")
@@ -134,7 +133,7 @@ async def audit_log(limit: int = Query(50, ge=1, le=500)):
         return {"audit": result, "count": len(result)}
     except Exception as exc:
         logger.error("Redis unavailable", extra={"error": str(exc)})
-        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
 
 
 @app.get("/analytics")
@@ -143,21 +142,21 @@ async def analytics(
     path: str = Query(..., description="Request path to query"),
     signal: Signal = Query(..., description="Golden signal"),
     window: str = Query(..., pattern="^(1m|5m)$", description="1m or 5m"),
-    from_ts: Optional[datetime] = Query(None, alias="from"),
-    to_ts: Optional[datetime] = Query(None, alias="to"),
+    from_ts: datetime | None = Query(None, alias="from"),
+    to_ts: datetime | None = Query(None, alias="to"),
 ) -> JSONResponse:
     trace_id = request.headers.get("X-Trace-Id", str(uuid.uuid4()))
     api_key = request.headers.get("X-API-Key", "")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if from_ts is None:
-        from_ts = datetime.fromtimestamp(now.timestamp() - 3600, tz=timezone.utc)
+        from_ts = datetime.fromtimestamp(now.timestamp() - 3600, tz=UTC)
     if to_ts is None:
         to_ts = now
     if from_ts.tzinfo is None:
-        from_ts = from_ts.replace(tzinfo=timezone.utc)
+        from_ts = from_ts.replace(tzinfo=UTC)
     if to_ts.tzinfo is None:
-        to_ts = to_ts.replace(tzinfo=timezone.utc)
+        to_ts = to_ts.replace(tzinfo=UTC)
 
     if (to_ts - from_ts).total_seconds() > MAX_RANGE_SECONDS:
         raise HTTPException(status_code=400, detail="Time range exceeds maximum allowed (7 days)")
@@ -166,7 +165,7 @@ async def analytics(
         r = await get_redis()
     except Exception as exc:
         logger.error("Redis unavailable", extra={"error": str(exc)})
-        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
 
     buckets_list = _buckets_for_range(from_ts.timestamp(), to_ts.timestamp(), window)
 
@@ -180,7 +179,8 @@ async def analytics(
         data = await query_error(r, path, window, buckets_list)
         if data:
             avg_err = sum(b["error_rate"] for b in data) / len(data)
-            summary = {"avg_error_rate": round(avg_err, 6), "total_requests": sum(b["count"] for b in data)}
+            total = sum(b["count"] for b in data)
+            summary = {"avg_error_rate": round(avg_err, 6), "total_requests": total}
         else:
             summary = None
     else:  # saturation

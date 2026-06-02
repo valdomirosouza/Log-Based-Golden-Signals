@@ -42,7 +42,7 @@ async def ready():
         await r.ping()
         return {"status": "ready"}
     except Exception:
-        raise HTTPException(status_code=503, detail="Not ready")
+        raise HTTPException(status_code=503, detail="Not ready") from None
 
 
 async def _write_audit(trace_id: str, endpoint: str, api_key: str, status_code: int) -> None:
@@ -112,7 +112,7 @@ async def ingest(request: Request) -> JSONResponse:
         await _write_audit(trace_id, "POST /ingestion", api_key, 422)
         return JSONResponse(
             status_code=422,
-            content={"detail": "logs must contain 1–1000 entries"},
+            content={"detail": "logs must contain 1-1000 entries"},
             headers={"X-Trace-Id": trace_id},
         )
 

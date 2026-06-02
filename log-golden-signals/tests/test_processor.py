@@ -1,13 +1,12 @@
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import asyncio
-import json
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, patch
 
+import pytest
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -115,6 +114,7 @@ class TestRetention:
 
     def test_1m_keys_get_2h_ttl(self):
         import importlib
+
         import metrics_processor.app.aggregator as agg_mod
         with patch.dict(os.environ, {"RETENTION_1M_SECONDS": "7200", "RETENTION_5M_SECONDS": "86400"}):
             importlib.reload(agg_mod)
