@@ -41,20 +41,24 @@ SUCCESS_CODES = [200, 201, 204]
 
 def lognormal_ms(mu_ms: float = 100.0, sigma_ms: float = 50.0) -> float:
     """Sample from a log-normal distribution parameterised in linear ms."""
-    mu_log = math.log(mu_ms ** 2 / math.sqrt(mu_ms ** 2 + sigma_ms ** 2))
+    mu_log = math.log(mu_ms**2 / math.sqrt(mu_ms**2 + sigma_ms**2))
     sigma_log = math.sqrt(math.log(1 + (sigma_ms / mu_ms) ** 2))
     return round(random.lognormvariate(mu_log, sigma_log), 3)
 
 
 def random_ipv4() -> str:
-    return f"{random.randint(10,192)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}"
+    return f"{random.randint(10, 192)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}"
 
 
 def make_entry(base_time: datetime, idx: int) -> dict:
     path = random.choices(PATHS, weights=PATH_WEIGHTS, k=1)[0]
     is_error = random.random() < 0.05
     status = random.choice(ERROR_CODES) if is_error else random.choice(SUCCESS_CODES)
-    method = "GET" if path in ("/health", "/metrics") else random.choice(["GET", "POST", "PUT", "DELETE"])
+    method = (
+        "GET"
+        if path in ("/health", "/metrics")
+        else random.choice(["GET", "POST", "PUT", "DELETE"])
+    )
     ts = base_time + timedelta(seconds=idx * 3)
     bytes_sent = random.randint(256, 8192)
     return {

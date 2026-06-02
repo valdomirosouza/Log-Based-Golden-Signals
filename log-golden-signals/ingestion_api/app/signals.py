@@ -4,9 +4,7 @@ from datetime import UTC
 from .models import GoldenSignalEvent, LogEntry
 from .pii import mask_ip
 
-SATURATION_BYTES_THRESHOLD = int(
-    os.getenv("SATURATION_BYTES_THRESHOLD", "1000000")
-)
+SATURATION_BYTES_THRESHOLD = int(os.getenv("SATURATION_BYTES_THRESHOLD", "1000000"))
 
 _WINDOW_1M = 60
 _WINDOW_5M = 300

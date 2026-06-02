@@ -63,9 +63,7 @@ def _governance(summary: dict | None) -> dict:
     }
 
 
-async def _write_audit(
-    r, trace_id: str, endpoint: str, api_key: str, status_code: int
-) -> None:
+async def _write_audit(r, trace_id: str, endpoint: str, api_key: str, status_code: int) -> None:
     try:
         await r.xadd(
             "golden-signals:audit",

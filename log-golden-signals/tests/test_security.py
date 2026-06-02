@@ -24,8 +24,10 @@ VALID_ENTRY = {
 
 # ── Ingestion API security ────────────────────────────────────────────────────
 
+
 def _ingestion_client():
     from ingestion_api.app.main import app
+
     return TestClient(app)
 
 
@@ -65,10 +67,12 @@ class TestIngestionAuth:
 
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 
+
 class TestRateLimiting:
     def test_rate_limit_logic_triggers_at_101(self):
         """Unit test the rate_limit module logic directly."""
         from ingestion_api.app.rate_limit import RATE_LIMIT
+
         assert RATE_LIMIT == 100
 
     def test_rate_limit_returns_429_when_exceeded(self):
@@ -82,6 +86,7 @@ class TestRateLimiting:
             import hashlib
 
             from ingestion_api.app.rate_limit import check_rate_limit
+
             key_hash = hashlib.sha256(b"test-key").hexdigest()
             return await check_rate_limit(mock_r, key_hash)
 
@@ -98,6 +103,7 @@ class TestRateLimiting:
             import hashlib
 
             from ingestion_api.app.rate_limit import check_rate_limit
+
             key_hash = hashlib.sha256(b"test-key").hexdigest()
             return await check_rate_limit(mock_r, key_hash)
 
@@ -108,8 +114,10 @@ class TestRateLimiting:
 
 # ── Analytics API security + HITL flag ───────────────────────────────────────
 
+
 def _analytics_client():
     from analytics_api.app.main import app
+
     return TestClient(app)
 
 
@@ -136,6 +144,7 @@ class TestAnalyticsAuth:
 class TestHITLGovernance:
     def test_governance_hotl_when_normal(self):
         from analytics_api.app.main import _governance
+
         summary = {"p99_ms": 200.0, "avg_error_rate": 0.02}
         gov = _governance(summary)
         assert gov["recommended_action_mode"] == "HOTL"
@@ -143,6 +152,7 @@ class TestHITLGovernance:
 
     def test_governance_hitl_when_p99_high(self):
         from analytics_api.app.main import _governance
+
         summary = {"p99_ms": 550.0, "avg_error_rate": 0.01}
         gov = _governance(summary)
         assert gov["recommended_action_mode"] == "HITL"
@@ -150,6 +160,7 @@ class TestHITLGovernance:
 
     def test_governance_hitl_when_error_rate_high(self):
         from analytics_api.app.main import _governance
+
         summary = {"p99_ms": 100.0, "avg_error_rate": 0.06}
         gov = _governance(summary)
         assert gov["recommended_action_mode"] == "HITL"
@@ -157,6 +168,7 @@ class TestHITLGovernance:
 
     def test_governance_pii_sanitized_always_true(self):
         from analytics_api.app.main import _governance
+
         gov = _governance(None)
         assert gov["pii_sanitized"] is True
         assert gov["data_classification"] == "operational-telemetry"
@@ -164,10 +176,12 @@ class TestHITLGovernance:
 
 # ── Audit log ─────────────────────────────────────────────────────────────────
 
+
 class TestAuditLog:
     def test_audit_entry_written_on_ingestion(self):
         """Verify that _write_audit is called during POST /ingestion."""
         import ingestion_api.app.main as main_mod
+
         audit_calls = []
 
         async def mock_audit(*args, **kwargs):

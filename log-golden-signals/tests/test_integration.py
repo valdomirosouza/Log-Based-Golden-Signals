@@ -43,6 +43,7 @@ def seed_1000_entries() -> None:
     """Import and run the seed script inline."""
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
     import importlib.util
+
     seed_path = os.path.join(os.path.dirname(__file__), "..", "scripts", "seed.py")
     spec = importlib.util.spec_from_file_location("seed", seed_path)
     mod = importlib.util.module_from_spec(spec)
@@ -126,4 +127,5 @@ def run_tests() -> None:
 
 if __name__ == "__main__":
     import urllib.parse
+
     run_tests()

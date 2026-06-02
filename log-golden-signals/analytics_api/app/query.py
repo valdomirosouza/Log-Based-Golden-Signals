@@ -13,13 +13,14 @@ from .percentiles import percentile
 
 logger = logging.getLogger("analytics_api.query")
 
-_VALID_PATH_RE = re.compile(r'^[a-zA-Z0-9_.~/:@-]+$')
+_VALID_PATH_RE = re.compile(r"^[a-zA-Z0-9_.~/:@-]+$")
 
 
 def validate_path(path: str) -> None:
     """Raise ValueError if path contains characters unsafe for Redis keys."""
     if not _VALID_PATH_RE.match(path):
         raise ValueError("Invalid path: contains disallowed characters")
+
 
 SATURATION_BYTES_THRESHOLD = float(os.getenv("SATURATION_BYTES_THRESHOLD", "1_000_000"))
 _WINDOW_SECONDS = {"1m": 60, "5m": 300}
@@ -78,15 +79,17 @@ async def query_latency(
         error_rate = errors / total_req if total_req > 0 else 0.0
         sat_pct = min(sat_bytes / SATURATION_BYTES_THRESHOLD, 1.0)
 
-        results.append({
-            "epoch_bucket": bucket,
-            "p50_ms": round(percentile(scores, 50) or 0.0, 3),
-            "p95_ms": round(percentile(scores, 95) or 0.0, 3),
-            "p99_ms": round(percentile(scores, 99) or 0.0, 3),
-            "count": count,
-            "error_rate": round(error_rate, 6),
-            "saturation_pct": round(sat_pct, 6),
-        })
+        results.append(
+            {
+                "epoch_bucket": bucket,
+                "p50_ms": round(percentile(scores, 50) or 0.0, 3),
+                "p95_ms": round(percentile(scores, 95) or 0.0, 3),
+                "p99_ms": round(percentile(scores, 99) or 0.0, 3),
+                "count": count,
+                "error_rate": round(error_rate, 6),
+                "saturation_pct": round(sat_pct, 6),
+            }
+        )
     return results
 
 
@@ -126,11 +129,13 @@ async def query_error(
             continue
         e = int(errors) if errors else 0
         t = int(total) if total else 1
-        results.append({
-            "epoch_bucket": bucket,
-            "count": t,
-            "error_rate": round(e / t, 6),
-        })
+        results.append(
+            {
+                "epoch_bucket": bucket,
+                "count": t,
+                "error_rate": round(e / t, 6),
+            }
+        )
     return results
 
 
@@ -149,10 +154,12 @@ async def query_saturation(
         if val is None:
             continue
         sat_pct = min(float(val) / SATURATION_BYTES_THRESHOLD, 1.0)
-        results.append({
-            "epoch_bucket": bucket,
-            "saturation_pct": round(sat_pct, 6),
-        })
+        results.append(
+            {
+                "epoch_bucket": bucket,
+                "saturation_pct": round(sat_pct, 6),
+            }
+        )
     return results
 
 

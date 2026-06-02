@@ -10,6 +10,7 @@ import pytest
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
+
 def _make_event(
     path="/api/v1/users",
     response_time_ms=45.0,
@@ -34,6 +35,7 @@ def run(coro):
 
 # ── Aggregation logic ─────────────────────────────────────────────────────────
 
+
 class TestAggregation:
     def _make_redis(self):
         r = AsyncMock()
@@ -46,24 +48,20 @@ class TestAggregation:
 
     def test_traffic_incr_called_for_both_windows(self):
         from metrics_processor.app.aggregator import aggregate
+
         r = self._make_redis()
         run(aggregate(r, _make_event()))
-        traffic_keys = [
-            c.args[0] for c in r.incr.call_args_list
-            if "traffic" in c.args[0]
-        ]
+        traffic_keys = [c.args[0] for c in r.incr.call_args_list if "traffic" in c.args[0]]
         assert len(traffic_keys) == 2
         assert any("1m" in k for k in traffic_keys)
         assert any("5m" in k for k in traffic_keys)
 
     def test_latency_zadd_called_for_both_windows(self):
         from metrics_processor.app.aggregator import aggregate
+
         r = self._make_redis()
         run(aggregate(r, _make_event(response_time_ms=99.9)))
-        latency_calls = [
-            c for c in r.zadd.call_args_list
-            if "latency" in c.args[0]
-        ]
+        latency_calls = [c for c in r.zadd.call_args_list if "latency" in c.args[0]]
         assert len(latency_calls) == 2
         # score must equal the response_time_ms value
         for c in latency_calls:
@@ -72,6 +70,7 @@ class TestAggregation:
 
     def test_error_counter_incremented_when_is_error(self):
         from metrics_processor.app.aggregator import aggregate
+
         r = self._make_redis()
         run(aggregate(r, _make_event(is_error=True)))
         error_keys = [c.args[0] for c in r.incr.call_args_list if ":error:" in c.args[0]]
@@ -79,6 +78,7 @@ class TestAggregation:
 
     def test_error_counter_not_incremented_when_not_error(self):
         from metrics_processor.app.aggregator import aggregate
+
         r = self._make_redis()
         run(aggregate(r, _make_event(is_error=False)))
         error_keys = [c.args[0] for c in r.incr.call_args_list if ":error:" in c.args[0]]
@@ -86,6 +86,7 @@ class TestAggregation:
 
     def test_saturation_incrbyfloat_called(self):
         from metrics_processor.app.aggregator import aggregate
+
         r = self._make_redis()
         run(aggregate(r, _make_event(bytes_sent=500_000)))
         sat_calls = [c for c in r.incrbyfloat.call_args_list if "saturation" in c.args[0]]
@@ -95,12 +96,14 @@ class TestAggregation:
 
     def test_path_registered_in_gs_paths_set(self):
         from metrics_processor.app.aggregator import aggregate
+
         r = self._make_redis()
         run(aggregate(r, _make_event(path="/api/v1/orders")))
         r.sadd.assert_called_with("gs:paths", "/api/v1/orders")
 
 
 # ── Retention TTL ─────────────────────────────────────────────────────────────
+
 
 class TestRetention:
     def _make_redis(self):
@@ -116,9 +119,13 @@ class TestRetention:
         import importlib
 
         import metrics_processor.app.aggregator as agg_mod
-        with patch.dict(os.environ, {"RETENTION_1M_SECONDS": "7200", "RETENTION_5M_SECONDS": "86400"}):
+
+        with patch.dict(
+            os.environ, {"RETENTION_1M_SECONDS": "7200", "RETENTION_5M_SECONDS": "86400"}
+        ):
             importlib.reload(agg_mod)
             from metrics_processor.app.aggregator import aggregate
+
             r = self._make_redis()
             run(aggregate(r, _make_event()))
             expire_calls = [(c.args[0], c.args[1]) for c in r.expire.call_args_list]
@@ -130,6 +137,7 @@ class TestRetention:
 
 
 # ── DLQ behaviour ─────────────────────────────────────────────────────────────
+
 
 class TestDLQ:
     def test_dlq_written_after_max_retries(self):
@@ -180,15 +188,21 @@ class TestAggregationEdgeCases:
     def test_aggregate_zero_bytes_sent_does_not_error(self):
         """bytes_sent=0 must call incrbyfloat with 0 without raising."""
         from metrics_processor.app.aggregator import aggregate
+
         r = self._make_redis()
-        run(aggregate(r, {
-            "path": "/api/test",
-            "response_time_ms": 10.0,
-            "bytes_sent": 0,
-            "is_error": False,
-            "window_1m": 1748685600,
-            "window_5m": 1748685300,
-        }))
+        run(
+            aggregate(
+                r,
+                {
+                    "path": "/api/test",
+                    "response_time_ms": 10.0,
+                    "bytes_sent": 0,
+                    "is_error": False,
+                    "window_1m": 1748685600,
+                    "window_5m": 1748685300,
+                },
+            )
+        )
         sat_calls = [c for c in r.incrbyfloat.call_args_list if "saturation" in c.args[0]]
         assert len(sat_calls) == 2
         for c in sat_calls:

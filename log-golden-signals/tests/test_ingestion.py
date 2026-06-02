@@ -25,6 +25,7 @@ VALID_ENTRY = {
 
 # ── Valid batch ────────────────────────────────────────────────────────────────
 
+
 def test_valid_batch_accepted():
     resp = client.post("/ingestion", json={"logs": [VALID_ENTRY] * 10})
     assert resp.status_code == 200
@@ -35,6 +36,7 @@ def test_valid_batch_accepted():
 
 
 # ── Schema validation ──────────────────────────────────────────────────────────
+
 
 def test_missing_required_field_rejected():
     bad = {k: v for k, v in VALID_ENTRY.items() if k != "status_code"}
@@ -56,6 +58,7 @@ def test_invalid_json_returns_422():
 
 # ── PII masking ────────────────────────────────────────────────────────────────
 
+
 def test_ipv4_last_octet_masked():
     assert mask_ip("192.168.1.100") == "192.168.1.xxx"
     assert mask_ip("10.0.0.1") == "10.0.0.xxx"
@@ -65,11 +68,13 @@ def test_ipv6_last_80_bits_masked():
     addr = mask_ip("2001:db8::1")
     # last 80 bits zeroed → last 5 hextets should be 0
     import ipaddress
+
     hextets = ipaddress.IPv6Address(addr).exploded.split(":")
     assert all(h == "0000" for h in hextets[3:])
 
 
 # ── Golden Signal extraction ───────────────────────────────────────────────────
+
 
 def _make_entry(**kwargs) -> LogEntry:
     data = {**VALID_ENTRY, **kwargs}
@@ -125,6 +130,7 @@ def test_status_code_boundary_399_not_error_400_is_error():
 def test_mask_ip_returns_original_on_invalid_input():
     """Malformed or non-IP strings are returned unchanged."""
     from ingestion_api.app.pii import mask_ip
+
     assert mask_ip("not-an-ip") == "not-an-ip"
     assert mask_ip("") == ""
     assert mask_ip("999.999.999.999") == "999.999.999.999"

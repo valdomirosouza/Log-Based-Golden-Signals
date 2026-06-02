@@ -144,6 +144,7 @@ async def _process_loop(r: aioredis.Redis) -> None:
 
 # ── HTTP /metrics endpoint ────────────────────────────────────────────────────
 
+
 async def _handle_metrics(request: web.Request) -> web.Response:
     return web.json_response(_stats)
 

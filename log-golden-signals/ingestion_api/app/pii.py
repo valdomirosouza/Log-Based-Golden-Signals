@@ -1,9 +1,7 @@
 import ipaddress
 import re
 
-_IPV4_RE = re.compile(
-    r"^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$"
-)
+_IPV4_RE = re.compile(r"^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$")
 
 
 def mask_ip(ip: str) -> str:
