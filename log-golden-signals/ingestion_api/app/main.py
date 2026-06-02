@@ -7,11 +7,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from .logging_config import configure_logging
 from .queue import publish
 from .signals import extract
 
+configure_logging()
 logger = logging.getLogger("ingestion_api")
-logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
 @asynccontextmanager
@@ -57,8 +58,8 @@ async def ingest(request: Request) -> JSONResponse:
             errors.append({"index": i, "detail": str(exc)})
 
     logger.info(
-        '{"service":"ingestion_api","trace_id":"%s","accepted":%d,"rejected":%d}',
-        trace_id, accepted, rejected,
+        "ingestion complete",
+        extra={"trace_id": trace_id, "accepted": accepted, "rejected": rejected},
     )
 
     return JSONResponse(
