@@ -5,14 +5,12 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware import Middleware
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError as PydanticValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .auth import api_key_middleware, sha256_key
 from .logging_config import configure_logging
-from .models import LogBatch, LogEntry
+from .models import LogEntry
 from .queue import get_redis, publish
 from .rate_limit import check_rate_limit
 from .signals import extract
@@ -101,23 +99,30 @@ async def ingest(request: Request) -> JSONResponse:
             headers={"X-Trace-Id": trace_id},
         )
 
-    try:
-        batch = LogBatch.model_validate(body)
-    except PydanticValidationError as exc:
+    # Validate batch structure and size (security: prevent unbounded arrays)
+    if not isinstance(body, dict) or not isinstance(body.get("logs"), list):
         await _write_audit(trace_id, "POST /ingestion", api_key, 422)
         return JSONResponse(
             status_code=422,
-            content={"detail": exc.errors()},
+            content={"detail": 'body must be {"logs": [...]}'},
             headers={"X-Trace-Id": trace_id},
         )
-    raw_logs = batch.logs
+    raw_logs = body["logs"]
+    if not (1 <= len(raw_logs) <= 1000):
+        await _write_audit(trace_id, "POST /ingestion", api_key, 422)
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "logs must contain 1–1000 entries"},
+            headers={"X-Trace-Id": trace_id},
+        )
 
     accepted = 0
     rejected = 0
     errors: list[dict[str, Any]] = []
 
-    for i, entry in enumerate(raw_logs):
+    for i, raw in enumerate(raw_logs):
         try:
+            entry = LogEntry.model_validate(raw)
             event = extract(entry)
             await publish(event)
             accepted += 1
