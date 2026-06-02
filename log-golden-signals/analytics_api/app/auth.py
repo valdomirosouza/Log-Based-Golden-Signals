@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import os
 
 from fastapi import Request
@@ -18,6 +19,6 @@ async def api_key_middleware(request: Request, call_next):
     if not required_key:
         return await call_next(request)
     provided = request.headers.get("X-API-Key", "")
-    if provided != required_key:
+    if not hmac.compare_digest(provided, required_key):
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
     return await call_next(request)
