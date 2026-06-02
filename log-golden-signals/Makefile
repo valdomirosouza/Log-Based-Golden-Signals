@@ -1,4 +1,4 @@
-.PHONY: build up down logs test test-integration seed
+.PHONY: build up down logs test test-integration seed clean restart ps status
 
 COMPOSE = docker compose -f docker-compose.yml
 
@@ -27,3 +27,20 @@ test-integration: up
 
 seed: up
 	python3 scripts/seed.py
+
+clean:
+	$(COMPOSE) down -v --remove-orphans
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+
+restart:
+	$(COMPOSE) restart
+
+ps:
+	$(COMPOSE) ps
+
+status:
+	@echo "=== Service Status ===" && \
+	(curl -sf http://localhost:8000/health > /dev/null && echo "ingestion_api  : OK" || echo "ingestion_api  : DOWN") && \
+	(curl -sf http://localhost:8001/health > /dev/null && echo "analytics_api  : OK" || echo "analytics_api  : DOWN") && \
+	(curl -sf http://localhost:8002/metrics > /dev/null && echo "metrics_processor: OK" || echo "metrics_processor: DOWN")

@@ -112,3 +112,25 @@ def test_saturation_bytes_preserved():
     entry = _make_entry(bytes_sent=500_000)
     event = extract(entry)
     assert event.bytes_sent == 500_000
+
+
+def test_error_signal_flagged_for_5xx():
+    """5xx status codes must set is_error=True."""
+    for code in [500, 502, 503, 504]:
+        entry = _make_entry(status_code=code)
+        event = extract(entry)
+        assert event.is_error is True, f"status {code} should be an error"
+
+
+def test_status_code_boundary_399_not_error_400_is_error():
+    """399 is NOT an error; 400 IS an error (exact boundary)."""
+    assert extract(_make_entry(status_code=399)).is_error is False
+    assert extract(_make_entry(status_code=400)).is_error is True
+
+
+def test_mask_ip_returns_original_on_invalid_input():
+    """Malformed or non-IP strings are returned unchanged."""
+    from ingestion_api.app.pii import mask_ip
+    assert mask_ip("not-an-ip") == "not-an-ip"
+    assert mask_ip("") == ""
+    assert mask_ip("999.999.999.999") == "999.999.999.999"

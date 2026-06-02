@@ -158,3 +158,31 @@ class TestAnalyticsAPI:
         assert body["status"] == "ok"
         assert "redis_connected" in body
         assert "tracked_paths" in body
+
+
+class TestPercentileEdgeCases:
+    def test_p0_returns_minimum(self):
+        """P0 must return the smallest value."""
+        from analytics_api.app.percentiles import percentile
+        values = [10.0, 20.0, 30.0, 40.0, 50.0]
+        assert percentile(values, 0) == pytest.approx(10.0)
+
+    def test_p100_returns_maximum(self):
+        """P100 must return the largest value."""
+        from analytics_api.app.percentiles import percentile
+        values = [10.0, 20.0, 30.0, 40.0, 50.0]
+        assert percentile(values, 100) == pytest.approx(50.0)
+
+    def test_all_identical_values(self):
+        """All same values — every percentile returns that value."""
+        from analytics_api.app.percentiles import percentile
+        values = [42.0] * 10
+        assert percentile(values, 50) == pytest.approx(42.0)
+        assert percentile(values, 99) == pytest.approx(42.0)
+
+    def test_buckets_range_single_point(self):
+        """from_ts == to_ts should return exactly one bucket (no crash)."""
+        from analytics_api.app.query import _buckets_for_range
+        buckets = _buckets_for_range(1748685600.0, 1748685600.0, "1m")
+        assert len(buckets) == 1
+        assert buckets[0] == 1748685600

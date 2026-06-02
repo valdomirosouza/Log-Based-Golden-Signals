@@ -16,12 +16,22 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
 
   whoami:
     image: traefik/whoami:latest
     container_name: gs_whoami
     networks:
       - golden-signals-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: 64M
 
   haproxy:
     build: ./haproxy
@@ -32,6 +42,11 @@ services:
       - golden-signals-net
     depends_on:
       - whoami
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
 
   ingestion_api:
     build: ./ingestion_api
@@ -51,6 +66,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
 
   metrics_processor:
     build: ./metrics_processor
@@ -71,6 +91,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
 
   analytics_api:
     build: ./analytics_api
@@ -90,3 +115,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
