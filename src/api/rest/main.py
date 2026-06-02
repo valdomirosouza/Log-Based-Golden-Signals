@@ -89,7 +89,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # local dev without a running database). Production must never use the
     # in-memory backend — audit records would be lost on pod restart.
     if app.state.db_pool is not None:
-        app.state.audit_logger = AuditLogger(PostgresAuditStorage(pool=app.state.db_pool))
+        _audit_encryption = (
+            EncryptedField(settings.db_encryption_key)
+            if settings.db_encryption_enabled
+            and "placeholder" not in settings.db_encryption_key.lower()
+            else None
+        )
+        app.state.audit_logger = AuditLogger(
+            PostgresAuditStorage(pool=app.state.db_pool, encryption=_audit_encryption)
+        )
     else:
         if settings.app_env == "production":
             raise RuntimeError(

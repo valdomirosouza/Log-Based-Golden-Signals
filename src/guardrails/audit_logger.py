@@ -5,7 +5,7 @@ completion before dispatching any action. A raised AuditWriteError must be
 treated as a hard failure — the action must not proceed.
 
 Spec: specs/ai/guardrails.md (Layer 4 — Audit Logger)
-ADR:  ADR-0011 (HITL/HOTL Human Oversight Model)
+ADR:  ADR-0011 (HITL/HOTL Human Oversight Model), ADR-0018 (DB Encryption at Rest)
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     import asyncpg
 
     from src.shared.db_client import ResilientDBPool
+    from src.shared.db_encryption import EncryptedField
 
 logger = get_logger("audit_logger")
 
@@ -81,7 +82,16 @@ class PostgresAuditStorage:
     the application role in the Alembic migration so the audit log is immutable
     even against application-level bugs.
 
+    Pass an EncryptedField to encrypt the metadata column at rest with
+    AES-256-GCM (ADR-0018). When encryption is None the store operates without
+    encryption — only valid for local dev. Production startup is blocked when
+    db_encryption_enabled=False (Settings.reject_placeholder_secrets).
+
+    The decrypt() passthrough in EncryptedField allows pre-existing plaintext
+    rows to be read back without a blocking migration.
+
     Schema: alembic/versions/0001_create_audit_events.py
+    Migration note: alembic/versions/0006_audit_events_metadata_encrypted.py
     """
 
     _INSERT = """
@@ -97,8 +107,23 @@ class PostgresAuditStorage:
         FROM audit_events
     """
 
-    def __init__(self, pool: asyncpg.Pool | ResilientDBPool) -> None:
+    def __init__(
+        self,
+        pool: asyncpg.Pool | ResilientDBPool,
+        encryption: EncryptedField | None = None,
+    ) -> None:
         self._pool = pool
+        self._encryption = encryption
+
+    def _encrypt_metadata(self, metadata: dict) -> str:
+        payload = json.dumps(metadata)
+        return self._encryption.encrypt(payload) if self._encryption else payload
+
+    def _decrypt_metadata(self, raw: str | None) -> dict:
+        if not raw:
+            return {}
+        value = self._encryption.decrypt(raw) if self._encryption else raw
+        return json.loads(value)
 
     async def append(self, event: AuditEvent) -> None:
         async with self._pool.acquire() as conn:
@@ -111,7 +136,7 @@ class PostgresAuditStorage:
                 event.action,
                 event.outcome,
                 event.risk_score,
-                json.dumps(event.metadata),
+                self._encrypt_metadata(event.metadata),
                 event.trace_id,
                 event.approver_id,
                 event.created_at,
@@ -164,7 +189,7 @@ class PostgresAuditStorage:
                 action=row["action"],
                 outcome=row["outcome"],
                 risk_score=row["risk_score"],
-                metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+                metadata=self._decrypt_metadata(row["metadata"]),
                 trace_id=row["trace_id"],
                 approver_id=row["approver_id"],
                 created_at=row["created_at"],
