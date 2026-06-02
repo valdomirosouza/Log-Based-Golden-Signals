@@ -11,6 +11,37 @@ Every entry must reference: Issue #, ADR # (if applicable), RFC # (if applicable
 
 ---
 
+## 0.1.0 (2026-06-02)
+
+
+### Features
+
+* **golden-signals:** Wave 1 — project scaffold & infrastructure baseline ([3eda7de](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/3eda7de485070a635f21e742275a761069e827d3)), closes [#7](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/7)
+* **golden-signals:** Wave 2 — ingestion API schema, PII masking & queue ([6ff33be](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/6ff33beda251f718799eec186f6eb15e49f86105)), closes [#8](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/8)
+* **golden-signals:** Wave 3 — metrics processor, Redis Streams & aggregation ([2c18651](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/2c186513361e722e107a607cb67eab144f30e6d9)), closes [#9](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/9)
+* **golden-signals:** Wave 4 — analytics API, percentile computation & query interface ([74976c7](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/74976c765ce4aba52a340df892b7eed4163ebfcd)), closes [#10](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/10)
+* **golden-signals:** Wave 5 — seed script, integration tests & observability ([2b7fa6a](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/2b7fa6a6b53273c1fb3599cdb5dc08f8d2cb4b70)), closes [#10](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/10)
+* **golden-signals:** Wave 6 — security hardening & HITL/HOTL governance ([39dee01](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/39dee01f04a37097064e39bffc1cdc4ccd9eaeb9)), closes [#12](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/12)
+
+
+### Bug Fixes
+
+* **config:** remove heredoc artifact from .claude/settings.json ([7eac274](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/7eac274898d1fe211bbb69d0f45e88bf4b2933ed)), closes [#33](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/33)
+* **ingestion:** explicit size validation preserves per-entry accepted/rejected tracking ([4b0c446](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/4b0c4466f0d478b27e081088120c2ea6e1e66c84))
+* **lint:** resolve all ruff violations in log-golden-signals/ ([67cdc44](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/67cdc44e5585be82e9053380e400a8ef94569898))
+* **lint:** resolve Gitleaks false positives and mypy errors ([#30](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/30), [#31](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/31)) ([5eb79e5](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/5eb79e553661b32641f2e41db417b321cd3e2a7d))
+* **main:** LogBatch validation, generic 503, MAXLEN audit, /ready, logging ([ed62acd](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/ed62acd8535a1bd4a3d870d19c6108ccb12adcdb))
+* **models,query:** ge=0 constraints, cap saturation, remove dead import, add logging_config ([65bcee8](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/65bcee8cc7eab24d05fec7753d92976bb76b91d9))
+* **processor:** SIGTERM graceful shutdown, log swallowed exceptions, move uuid import ([1bc5d60](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/1bc5d603ee83e71af30b1154ea98a2bd91158c39))
+* **setup:** resolve three make setup failures on fresh clone ([ef1639f](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/ef1639fc2df76fd76dac7927b8055d28b944d670)), closes [#64](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/64)
+
+
+### Documentation
+
+* add Log-Based Golden Signals section to root README ([9e728b6](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/9e728b648fd5cce949b9b153741dd22d9c23886e))
+* replace README with Log-Based Golden Signals project content ([93ebccd](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/93ebccd6dea730176d200c52308c49efb911da57))
+* update CHANGELOG for ADR compliance fixes and guardrails ([94d4ee5](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/94d4ee57a460015787ddf91d6c2fd73858b7865e)), closes [#32](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/32)
+
 ## [Unreleased]
 
 ### Security
