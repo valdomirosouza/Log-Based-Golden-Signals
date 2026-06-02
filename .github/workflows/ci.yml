@@ -356,10 +356,52 @@ jobs:
             zap-report.json
           retention-days: 30
 
+  gitleaks:
+    name: Gitleaks — Git History Secret Scan
+    # ADR-0029 §4: scan full git history for secrets beyond what detect-secrets
+    # catches on staged changes only. Runs alongside lint to fail fast.
+    runs-on: ubuntu-latest
+    needs: governance
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0 # full history required — gitleaks scans all commits
+      - name: Install Gitleaks
+        run: |
+          GITLEAKS_VERSION=8.21.2
+          curl -sSL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+      - name: Scan git history for secrets (ADR-0029)
+        run: gitleaks detect --source . --no-banner --redact --exit-code 1
+
+  iac-scan:
+    name: IaC Security Scan (Checkov)
+    # ADR-0029 §1: Checkov scans Terraform, Helm, and K8s manifests under
+    # infrastructure/ for misconfigurations. Trivy config scan (in build) covers
+    # container images; Checkov covers IaC source files. Both are required.
+    runs-on: ubuntu-latest
+    needs: governance
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install Checkov
+        run: pip install checkov
+      - name: Scan infrastructure/ for IaC misconfigurations (ADR-0029)
+        run: |
+          checkov -d infrastructure/ \
+            --compact \
+            --quiet \
+            --hard-fail-on HIGH,CRITICAL \
+            --skip-check CKV_DOCKER_2,CKV_DOCKER_3
+        # CKV_DOCKER_2/3 (HEALTHCHECK, LABEL) are informational-only and
+        # not required by the threat model; all HIGH/CRITICAL checks block.
+
   build:
     name: Build Docker Image
     runs-on: ubuntu-latest
-    needs: [test-unit, test-security, test-integration, dast]
+    needs:
+      [test-unit, test-security, test-integration, dast, gitleaks, iac-scan]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Set up Docker Buildx
