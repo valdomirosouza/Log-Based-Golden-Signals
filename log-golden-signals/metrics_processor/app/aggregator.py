@@ -10,6 +10,7 @@ Key patterns (per spec):
 
 import logging
 import os
+import uuid
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -45,7 +46,6 @@ async def aggregate(r: aioredis.Redis, event: dict[str, Any]) -> None:
         # Latency — ZADD sorted set (score = value, member = value:uuid for uniqueness)
         # Score == response_time_ms so ZRANGEBYSCORE gives rank-ordered values.
         l_key = _key("latency", path, window_label, bucket)
-        import uuid
         await r.zadd(l_key, {f"{response_time_ms}:{uuid.uuid4().hex}": response_time_ms})
         await _set_ttl(r, l_key, window_label)
 
