@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class LogEntry(BaseModel):
@@ -9,8 +9,8 @@ class LogEntry(BaseModel):
     path: str
     method: str
     status_code: int
-    response_time_ms: float
-    bytes_sent: int
+    response_time_ms: float = Field(ge=0.0)
+    bytes_sent: int = Field(ge=0)
     client_ip: str
     backend_name: Optional[str] = None
 

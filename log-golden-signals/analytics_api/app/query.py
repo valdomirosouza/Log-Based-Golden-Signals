@@ -76,7 +76,7 @@ async def query_latency(
         sat_bytes = float(sat_raw) if sat_raw else 0.0
 
         error_rate = errors / total_req if total_req > 0 else 0.0
-        sat_pct = sat_bytes / SATURATION_BYTES_THRESHOLD
+        sat_pct = min(sat_bytes / SATURATION_BYTES_THRESHOLD, 1.0)
 
         results.append({
             "epoch_bucket": bucket,
@@ -148,7 +148,7 @@ async def query_saturation(
             continue
         if val is None:
             continue
-        sat_pct = float(val) / SATURATION_BYTES_THRESHOLD
+        sat_pct = min(float(val) / SATURATION_BYTES_THRESHOLD, 1.0)
         results.append({
             "epoch_bucket": bucket,
             "saturation_pct": round(sat_pct, 6),

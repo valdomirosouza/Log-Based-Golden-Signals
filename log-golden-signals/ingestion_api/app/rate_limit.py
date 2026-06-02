@@ -3,7 +3,6 @@ Sliding-window rate limiter: max 100 requests/minute per API key.
 Uses Redis INCR + EXPIRE for an atomic per-minute counter.
 """
 
-import math
 import time
 from typing import Optional
 
