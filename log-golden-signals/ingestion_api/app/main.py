@@ -1,21 +1,26 @@
 import logging
+import os
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware import Middleware
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError as PydanticValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .auth import api_key_middleware, sha256_key
 from .logging_config import configure_logging
+from .models import LogBatch, LogEntry
 from .queue import get_redis, publish
 from .rate_limit import check_rate_limit
 from .signals import extract
 
 configure_logging()
 logger = logging.getLogger("ingestion_api")
+
+RETENTION_AUDIT_MAXLEN = int(os.getenv("RETENTION_AUDIT_MAXLEN", "100000"))
 
 
 @asynccontextmanager
@@ -32,6 +37,16 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/ready")
+async def ready():
+    try:
+        r = await get_redis()
+        await r.ping()
+        return {"status": "ready"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="Not ready")
+
+
 async def _write_audit(trace_id: str, endpoint: str, api_key: str, status_code: int) -> None:
     try:
         r = await get_redis()
@@ -44,9 +59,11 @@ async def _write_audit(trace_id: str, endpoint: str, api_key: str, status_code: 
                     "api_key_hash": sha256_key(api_key),
                     "status_code": str(status_code),
                 },
+                maxlen=RETENTION_AUDIT_MAXLEN,
+                approximate=True,
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("audit write failed", extra={"trace_id": trace_id, "error": str(exc)})
 
 
 @app.post("/ingestion")
@@ -61,7 +78,6 @@ async def ingest(request: Request) -> JSONResponse:
         r = None
 
     if r and api_key:
-        import os
         if os.getenv("INGESTION_API_KEY", ""):  # only rate-limit when auth is enabled
             allowed, retry_after = await check_rate_limit(r, sha256_key(api_key))
             if not allowed:
@@ -85,16 +101,23 @@ async def ingest(request: Request) -> JSONResponse:
             headers={"X-Trace-Id": trace_id},
         )
 
+    try:
+        batch = LogBatch.model_validate(body)
+    except PydanticValidationError as exc:
+        await _write_audit(trace_id, "POST /ingestion", api_key, 422)
+        return JSONResponse(
+            status_code=422,
+            content={"detail": exc.errors()},
+            headers={"X-Trace-Id": trace_id},
+        )
+    raw_logs = batch.logs
+
     accepted = 0
     rejected = 0
     errors: list[dict[str, Any]] = []
 
-    raw_logs = body.get("logs", []) if isinstance(body, dict) else []
-
-    for i, raw in enumerate(raw_logs):
+    for i, entry in enumerate(raw_logs):
         try:
-            from .models import LogEntry
-            entry = LogEntry.model_validate(raw)
             event = extract(entry)
             await publish(event)
             accepted += 1

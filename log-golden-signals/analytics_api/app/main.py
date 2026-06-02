@@ -1,4 +1,5 @@
 import logging
+import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .auth import api_key_middleware, sha256_key
+from .logging_config import configure_logging
 from .query import (
     _buckets_for_range,
     query_error,
@@ -20,8 +22,11 @@ from .query import (
 )
 from .redis_client import get_redis, is_connected
 
+configure_logging()
 logger = logging.getLogger("analytics_api")
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+RETENTION_AUDIT_MAXLEN = int(os.getenv("RETENTION_AUDIT_MAXLEN", "100000"))
+MAX_RANGE_SECONDS = int(os.getenv("ANALYTICS_MAX_RANGE_SECONDS", str(7 * 24 * 3600)))
 
 _HITL_P99_THRESHOLD_MS = 500.0
 _HITL_ERROR_RATE_THRESHOLD = 0.05
@@ -71,14 +76,26 @@ async def _write_audit(
                 "api_key_hash": sha256_key(api_key),
                 "status_code": str(status_code),
             },
+            maxlen=RETENTION_AUDIT_MAXLEN,
+            approximate=True,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("audit write failed", extra={"trace_id": trace_id, "error": str(exc)})
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/ready")
+async def ready():
+    try:
+        r = await get_redis()
+        await r.ping()
+        return {"status": "ready"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="Not ready")
 
 
 @app.get("/analytics/health")
@@ -89,8 +106,8 @@ async def analytics_health():
         try:
             r = await get_redis()
             tracked = await r.scard("gs:paths")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("analytics_health scard failed", extra={"error": str(exc)})
     return {"status": "ok", "redis_connected": connected, "tracked_paths": tracked}
 
 
@@ -101,7 +118,8 @@ async def analytics_paths():
         paths = await r.smembers("gs:paths")
         return {"paths": sorted(paths)}
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Redis unavailable: {exc}")
+        logger.error("Redis unavailable", extra={"error": str(exc)})
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
 
 @app.get("/audit")
@@ -115,7 +133,8 @@ async def audit_log(limit: int = Query(50, ge=1, le=500)):
             result.append({"id": msg_id, **fields})
         return {"audit": result, "count": len(result)}
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Redis unavailable: {exc}")
+        logger.error("Redis unavailable", extra={"error": str(exc)})
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
 
 @app.get("/analytics")
@@ -140,10 +159,14 @@ async def analytics(
     if to_ts.tzinfo is None:
         to_ts = to_ts.replace(tzinfo=timezone.utc)
 
+    if (to_ts - from_ts).total_seconds() > MAX_RANGE_SECONDS:
+        raise HTTPException(status_code=400, detail="Time range exceeds maximum allowed (7 days)")
+
     try:
         r = await get_redis()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Redis unavailable: {exc}")
+        logger.error("Redis unavailable", extra={"error": str(exc)})
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
     buckets_list = _buckets_for_range(from_ts.timestamp(), to_ts.timestamp(), window)
 
