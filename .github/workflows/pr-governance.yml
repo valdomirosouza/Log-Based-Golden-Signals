@@ -1,0 +1,220 @@
+# PR governance gates (REM-008, REM-010).
+#
+# Turns the repo's documented conventions into *enforced* CI checks:
+#   • Conventional-Commit PR title (the squash-merge subject)
+#   • spec reference for product/code changes (feat/fix/security/privacy/perf)
+#   • version.txt ⇄ pyproject.toml consistency when either is changed
+#
+# CHANGELOG ownership: release-please generates CHANGELOG.md from Conventional-Commit
+# titles (RFC-0012) — there is no manual `[Unreleased]` gate.
+#
+# Escape hatches: `no-issue` (issue check), `no-spec` label;
+# docs: PR titles are exempt from the issue check; Dependabot and the
+# release-please bot are exempted where appropriate.
+#
+# Runs on `pull_request` (read-only token; only the version-consistency job checks
+# out code, and only to read two files).
+
+name: PR Governance
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-governance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  issue-referenced:
+    name: GitHub Issue referenced
+    runs-on: ubuntu-latest
+    env:
+      BODY: ${{ github.event.pull_request.body }}
+      TITLE: ${{ github.event.pull_request.title }}
+      LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+    steps:
+      - name: Require a GitHub Issue link (Step 1 — CLAUDE.md §2)
+        run: |
+          if printf ',%s,' "$LABELS" | grep -q ',no-issue,'; then
+            echo "no-issue label present — exempt"; exit 0
+          fi
+          if printf '%s' "$TITLE" | grep -qE '^docs(\(|!|:)'; then
+            echo "docs-only PR — issue reference not required"; exit 0
+          fi
+          if printf '%s' "$TITLE" | grep -qE '^chore\(release\):'; then
+            echo "release PR — issue reference not required"; exit 0
+          fi
+          if printf '%s' "$TITLE" | grep -qE '^\w+\(ci\):'; then
+            echo "CI-scoped PR — issue reference not required"; exit 0
+          fi
+          if printf '%s\n%s' "$BODY" "$TITLE" | grep -qiE '(closes|fixes|resolves|references|ref|see)? *#[0-9]+|GH-[0-9]+'; then
+            echo "Issue reference found."
+          else
+            echo "::error::No GitHub Issue reference found. Every PR must link to an Issue (e.g. 'Closes #42')."
+            echo "Step 1 of the mandatory development workflow requires a registered issue before any work begins."
+            echo "Escape hatches: add the 'no-issue' label, or use a 'docs:' PR title for documentation-only changes."
+            exit 1
+          fi
+
+  conventional-title:
+    name: Conventional PR title
+    runs-on: ubuntu-latest
+    env:
+      TITLE: ${{ github.event.pull_request.title }}
+    steps:
+      - name: Validate PR title
+        run: |
+          echo "Title: $TITLE"
+          pattern='^(feat|fix|docs|refactor|test|chore|security|privacy|perf|ci|build|style|revert)(\([a-z0-9 ,._/-]+\))?!?: .+'
+          if ! printf '%s' "$TITLE" | grep -qE "$pattern"; then
+            echo "::error::PR title must follow Conventional Commits, e.g. 'feat(api): add X'."
+            echo "Allowed types: feat, fix, docs, refactor, test, chore, security, privacy, perf, ci, build, style, revert."
+            exit 1
+          fi
+          echo "OK"
+
+  # NOTE: the "CHANGELOG updated" job was removed in RFC-0012. release-please is now the
+  # single owner of CHANGELOG.md (generated from Conventional-Commit PR titles, which the
+  # `conventional-title` job above already enforces). Manual `[Unreleased]` upkeep is retired.
+
+  spec-reference:
+    name: Spec reference
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    env:
+      TITLE: ${{ github.event.pull_request.title }}
+      BODY: ${{ github.event.pull_request.body }}
+      LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+    steps:
+      - name: Require a spec reference for product/code changes
+        run: |
+          if printf ',%s,' "$LABELS" | grep -q ',no-spec,'; then
+            echo "no-spec label present — exempt"; exit 0
+          fi
+          if printf '%s' "$TITLE" | grep -qE '^\w+\(ci\):'; then
+            echo "CI-scoped PR — spec not required"; exit 0
+          fi
+          if printf '%s' "$TITLE" | grep -qE '^\w+\(docs\):'; then
+            echo "Docs-scoped PR — spec not required"; exit 0
+          fi
+          if printf '%s' "$TITLE" | grep -qE '^(feat|fix|security|privacy|perf)(\(|!|:)'; then
+            if printf '%s' "$BODY" | grep -qE 'specs/[A-Za-z0-9/._-]+\.md'; then
+              echo "spec reference found"
+            else
+              echo "::error::feat/fix/security/privacy/perf PRs must reference a spec (specs/....md) in the body, or add the 'no-spec' label with justification."
+              exit 1
+            fi
+          else
+            echo "PR type is exempt from the spec requirement"
+          fi
+
+  version-consistency:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    # release-please bumps pyproject.toml on its release PR; don't block the bot.
+    if: github.event.pull_request.user.login != 'github-actions[bot]'
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR: ${{ github.event.pull_request.number }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: version.txt must match pyproject.toml when either changes (REM-010)
+        run: |
+          files=$(gh pr view "$PR" --repo "$REPO" --json files --jq '.files[].path')
+          if printf '%s\n' "$files" | grep -qE '^(version\.txt|pyproject\.toml)$'; then
+            vt=$(tr -d '[:space:]' < version.txt)
+            pp=$(grep -m1 -E '^version *= *"' pyproject.toml | sed -E 's/.*"([^"]+)".*/\1/')
+            echo "version.txt=$vt  pyproject=$pp"
+            if [ "$vt" != "$pp" ]; then
+              echo "::error::version.txt ($vt) and pyproject.toml ($pp) disagree — keep the single source of truth in sync (REM-010)."
+              exit 1
+            fi
+            echo "versions match"
+          else
+            echo "no version files changed — skip"
+          fi
+
+  f7-hook-guard:
+    name: High-risk Action Guard (F7)
+    runs-on: ubuntu-latest
+    # Regression gate for the F7 high-risk-action guard (issue #133, ADR-0034). A PR that
+    # weakens the guard's decision logic or unwires it from settings.json fails here and
+    # cannot merge (W1-T3). The 38/38 decision baseline is the floor — never lower it.
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify high-risk-action guard (decision logic + settings.json wiring)
+        run: make verify-f7-hook
+
+  change-type-label:
+    name: Change-type label (CAB)
+    runs-on: ubuntu-latest
+    # PR-time CAB / change-management gate (W1-2): shifts the deploy-time cab-check (cd-production)
+    # left to PR time — every change is classified before merge (ISO A.8.32, SOX change mgmt).
+    # Bots that open mechanical PRs are exempt.
+    if: >-
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      github.event.pull_request.user.login != 'github-actions[bot]'
+    env:
+      TITLE: ${{ github.event.pull_request.title }}
+      BODY: ${{ github.event.pull_request.body }}
+      LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Require exactly one change-type label (+ RFC for normal/emergency)
+        # REPORT MODE during burn-in (ADR-0070): a missing/ambiguous label warns but does not block
+        # (the step is continue-on-error). Flip to blocking by removing `continue-on-error` once the
+        # labeling convention is adopted — see docs/governance/gate-lifecycle.md.
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          verdict=PASS; reason="ok"
+          if printf '%s' "$TITLE" | grep -qE '^docs(\(|!|:)'; then
+            echo "docs-only PR — change-type label not required."
+          else
+            found=""
+            for ct in standard-change normal-change emergency-change; do
+              printf ',%s,' "$LABELS" | grep -q ",${ct}," && found="$found $ct"
+            done
+            count=$(printf '%s' "$found" | wc -w | tr -d ' ')
+            if [ "$count" -eq 0 ]; then
+              verdict=FAIL; reason="no change-type label"
+            elif [ "$count" -gt 1 ]; then
+              verdict=FAIL; reason="multiple change-type labels:$found"
+            else
+              ct=$(printf '%s' "$found" | tr -d ' ')
+              echo "Change type: $ct"
+              case "$ct" in
+                normal-change|emergency-change)
+                  if printf '%s' "$BODY" | grep -qiE 'Refs:[[:space:]]*RFC-[0-9]+'; then
+                    echo "RFC reference found for $ct."
+                  else
+                    verdict=FAIL; reason="$ct requires 'Refs: RFC-NNNN' in the PR body"
+                  fi ;;
+              esac
+            fi
+          fi
+          # Objective burn-in row for the ADR-0070 lifecycle log (copy into gate-lifecycle.md).
+          today="$(date -u +%Y-%m-%d)"
+          if [ "$verdict" = FAIL ]; then fp='? (classify)'; else fp='no'; fi
+          {
+            echo "### Change-type label gate — burn-in row (ADR-0070)"
+            echo ""
+            echo "| Date (UTC) | PR | Verdict | False positive? | Notes |"
+            echo "| ---------- | --- | ------- | --------------- | ----- |"
+            echo "| ${today} | #${PR_NUMBER} | ${verdict} | ${fp} | ${reason} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$verdict" = FAIL ]; then
+            echo "::warning::Change-type CAB gate: ${reason} (report mode, ADR-0070 burn-in). Add exactly one of standard-change / normal-change / emergency-change (normal/emergency also need 'Refs: RFC-NNNN'). ISO A.8.32 / SOX."
+            exit 1
+          fi
+          echo "Change-type CAB gate satisfied."

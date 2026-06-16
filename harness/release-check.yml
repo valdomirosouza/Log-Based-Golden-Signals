@@ -1,0 +1,89 @@
+name: release-check
+description: Release gate — all gates must pass before a production release is cut
+version: "1.0"
+
+gates:
+  - name: sbom-generated
+    command: >
+      test -f sbom.cyclonedx.json &&
+      cosign verify-attestation
+        --type cyclonedx
+        ${CONTAINER_REGISTRY}/${GITHUB_REPOSITORY}:${VERSION}
+    blocking: true
+    failure_message: "SBOM not found or not attested. Run 'make sbom' and ensure cosign attestation succeeded."
+
+  - name: error-budget-check
+    command: >
+      bash -c "
+        BUDGET=$(curl -sf \"${PROMETHEUS_URL}/api/v1/query\"
+          --data-urlencode 'query=slo:error_budget_remaining:ratio{service=\"api-gateway\"}'
+          | jq -r '.data.result[0].value[1]');
+        echo \"Remaining error budget: $BUDGET\";
+        [ $(echo \"$BUDGET > 0.10\" | bc -l) -eq 1 ]
+      "
+    blocking: true
+    failure_message: "Error budget < 10% remaining. Feature releases are blocked until budget recovers (see docs/sre/slo/error-budget-policy.md)."
+
+  - name: prr-complete
+    command: >
+      python -c "
+        import yaml, sys
+        with open('docs/sre/prr/prr-checklist.yaml') as f:
+            checklist = yaml.safe_load(f)
+        blocking = [i for section in checklist['sections'] for i in section['items']
+                    if i.get('blocking') and not i.get('completed')]
+        if blocking:
+            print('Incomplete blocking PRR items:', [i['id'] for i in blocking])
+            sys.exit(1)
+        print('All blocking PRR items complete')
+      "
+    blocking: true
+    failure_message: "Blocking PRR items are incomplete. Complete the PRR checklist at docs/sre/prr/prr-checklist.yaml before release."
+
+  - name: dpia-ripd-current
+    command: >
+      bash -c "
+        DPIA=$(ls docs/privacy/dpia/dpia-v*.md | sort -V | tail -1);
+        RIPD=$(ls docs/privacy/ripd/ripd-v*.md | sort -V | tail -1);
+        echo \"Current DPIA: $DPIA | Current RIPD: $RIPD\";
+        grep -q 'Status.*Approved' \"$DPIA\" && grep -q 'Status.*Aprovado' \"$RIPD\"
+      "
+    blocking: true
+    failure_message: "DPIA or RIPD not approved. DPO approval is required before processing personal data in production."
+
+  - name: manual-approval
+    command: >
+      bash -c "
+        echo 'Manual gate: confirm CAB approval for this release.';
+        echo 'Set MANUAL_APPROVAL=confirmed in the environment to pass this gate.';
+        [ \"${MANUAL_APPROVAL}\" = 'confirmed' ]
+      "
+    blocking: true
+    failure_message: "Manual CAB approval not confirmed. Set MANUAL_APPROVAL=confirmed after RFC is approved by CAB."
+
+pre_release_compliance:
+  - id: REL-SOX-01
+    description: "Release notes must document all financial data path changes [IF SOX APPLIES]"
+    check: "CHANGELOG.md [Unreleased] section must exist and be non-empty"
+    severity: BLOCKING
+    condition: sox_applicable == true
+
+  - id: REL-ISO-01
+    description: "Production deploy requires RFC approval"
+    check: "merge commit message for release tag must contain Refs: RFC-\\d+"
+    severity: BLOCKING (for normal-change)
+
+  - id: REL-DORA-01
+    description: "DORA metrics dashboard must be present"
+    check: "infrastructure/monitoring/grafana/dora-metrics.json must exist"
+    severity: WARNING
+
+  - id: REL-OWASP-01
+    description: "DAST scan report must be present for this release"
+    check: "docs/security/zap-reports/ must contain a report dated within 7 days of release"
+    severity: BLOCKING
+
+  - id: REL-SBOM-01
+    description: "SBOM must be generated and signed for release artifact"
+    check: "cosign verify-attestation on release image must succeed"
+    severity: BLOCKING

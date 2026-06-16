@@ -1,0 +1,184 @@
+name: Release
+
+on:
+  push:
+    branches: ["main"]
+  # Manual re-trigger. When a PR is auto-merged by the github-actions bot (GITHUB_TOKEN), the
+  # resulting push to main does NOT fire push-triggered workflows (GitHub anti-recursion), so
+  # release-please never runs and no release PR is opened. Dispatch this workflow manually
+  # (`gh workflow run release.yml --ref main`) to re-evaluate main and open/refresh the release PR.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  packages: write
+  id-token: write
+  attestations: write # REM-007 — sign SLSA build provenance
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0 # full history so the version.txt sync step (RFC-0005) can operate on the release branch
+          # Persist the PAT as the git credential so the version-sync step's push below is authored
+          # by a real user and TRIGGERS the release PR's required CI checks. A GITHUB_TOKEN push does
+          # NOT trigger workflows, which left the release PR un-mergeable (checks "expected") — see
+          # RFC-0014 / #148. release-please-action uses its own `token:` input, so it is unaffected.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        continue-on-error: true # manual releases are used; release-please requires "Allow Actions to create PRs" repo setting
+        with:
+          # Use a PAT (RELEASE_PLEASE_TOKEN) so the release PR is authored by a real user and
+          # therefore TRIGGERS the required status checks — GitHub does NOT run workflows on
+          # GITHUB_TOKEN-authored PRs, which otherwise leaves the release PR permanently BLOCKED
+          # under branch protection (RFC-0014). Falls back to GITHUB_TOKEN until the secret is
+          # set; with the PAT present the release PR goes green and merges with no --admin.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          # Manifest mode (RFC-0006): release-type + custom changelog sections live in
+          # release-please-config.json (v4 dropped the inline `changelog-types` input, #93).
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Sync version files on the release PR (ADR-0057 SoT, RFC-0005/RFC-0008)
+        # release-please bumps pyproject.toml on its PR branch, but two other files carry the
+        # framework version and are checked by version-consistency (pr-governance):
+        #   - version.txt — the single source of truth (ADR-0057)
+        #   - README.md `**Version:**` badge
+        # Neither is touched by release-please (both are consumed/checked raw and cannot carry
+        # release-please annotation markers), so mirror the bumped version into both on the
+        # release branch. (CLAUDE.md's own **Version:** is the behavioral-contract version and
+        # is deliberately excluded by check_version_consistency.py — do NOT touch it.)
+        # Runs after the action on every push to main, so it survives release-please's
+        # force-push. This push does not re-trigger release.yml (which is `on: push` to `main`),
+        # but because checkout authenticated with the PAT above, it DOES trigger the release PR's
+        # `pull_request` checks in ci.yml — which is required for the PR to become mergeable
+        # (RFC-0014 / #148). A GITHUB_TOKEN push would not, leaving the checks "expected".
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH=release-please--branches--main
+          if ! git fetch origin "$BRANCH"; then
+            echo "No release PR branch — nothing to sync."; exit 0
+          fi
+          git checkout "$BRANCH"
+          VER="$(grep -m1 -E '^version *= *"' pyproject.toml | sed -E 's/^version *= *"([^"]+)".*/\1/')"
+          if [ -z "$VER" ]; then echo "Could not read pyproject version"; exit 0; fi
+          changed=0
+          if [ "$(cat version.txt 2>/dev/null)" != "$VER" ]; then
+            printf '%s\n' "$VER" > version.txt; changed=1; echo "version.txt -> $VER"
+          fi
+          README_VER="$(grep -m1 -oE '^> \*\*Version:\*\* [0-9]+\.[0-9]+\.[0-9]+' README.md | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
+          if [ -n "$README_VER" ] && [ "$README_VER" != "$VER" ]; then
+            sed -i -E "s|^> \*\*Version:\*\* [0-9]+\.[0-9]+\.[0-9]+|> **Version:** ${VER}|" README.md
+            changed=1; echo "README **Version:** $README_VER -> $VER"
+          fi
+          if [ "$changed" -eq 0 ]; then echo "version files already consistent ($VER)"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: sync version files to $VER (ADR-0057, RFC-0005/0008)"
+          git push origin "$BRANCH"
+          echo "Synced version files -> $VER on $BRANCH"
+
+  build-release-image:
+    name: Build and Push Release Image
+    runs-on: ubuntu-latest
+    needs: release-please
+    # Only publish when a release was created AND a container registry is configured.
+    # Without registry config the job is skipped (not failed) — see image-publish-skipped
+    # below for the explanatory notice (RFC-0009, #96).
+    if: needs.release-please.outputs.release_created == 'true' && vars.CONTAINER_REGISTRY != ''
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Compute lowercase image name (GHCR/OCI require lowercase)
+        id: img
+        env:
+          REGISTRY: ${{ vars.CONTAINER_REGISTRY }}
+          REPO: ${{ github.repository }}
+        run: |
+          name=$(printf '%s/%s' "$REGISTRY" "$REPO" | tr '[:upper:]' '[:lower:]')
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Login to container registry
+        # GHCR via the built-in GITHUB_TOKEN (RFC-0010) — no stored registry secrets needed
+        # (the workflow grants packages: write). For an external registry instead, swap
+        # username/password to REGISTRY_USERNAME / REGISTRY_PASSWORD secrets.
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ vars.CONTAINER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push release image
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.img.outputs.name }}:${{ needs.release-please.outputs.version }}
+            ${{ steps.img.outputs.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attest build provenance (SLSA)
+        # REM-007 — emit signed SLSA build provenance for the released image (SLSA Build L2+).
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ${{ steps.img.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.2
+
+      - name: Sign release image
+        # --yes: non-interactive keyless signing in CI (OIDC via id-token: write)
+        run: |
+          cosign sign --yes \
+            ${{ steps.img.outputs.name }}:${{ needs.release-please.outputs.version }}
+
+      - name: Install Syft and generate SBOM
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+          syft . --output cyclonedx-json=sbom.cyclonedx.json
+
+      - name: Attest SBOM
+        run: |
+          cosign attest --yes \
+            --predicate sbom.cyclonedx.json \
+            --type cyclonedx \
+            ${{ steps.img.outputs.name }}:${{ needs.release-please.outputs.version }}
+
+      - name: Attach SBOM to GitHub release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          files: sbom.cyclonedx.json
+
+  image-publish-skipped:
+    # Graceful, non-failing notice when a release is cut without a container registry
+    # configured (RFC-0009, #96). The GitHub Release + tag still succeed; only the
+    # image build/push/sign/SBOM-attest is skipped.
+    name: Image Publish (skipped — no registry configured)
+    runs-on: ubuntu-latest
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true' && vars.CONTAINER_REGISTRY == ''
+    steps:
+      - name: Explain skip
+        run: |
+          echo "::notice title=Image publish skipped::Release ${{ needs.release-please.outputs.tag_name }} created, but no CONTAINER_REGISTRY is configured — image build/push/sign/SBOM-attest were skipped. To enable: set the CONTAINER_REGISTRY repo/org variable and the REGISTRY_USERNAME / REGISTRY_PASSWORD secrets (Settings → Secrets and variables → Actions). See issue #96 and SETUP.md."

@@ -1,0 +1,80 @@
+# Default values — override in values-staging.yaml / values-production.yaml
+# event-worker is a Kafka consumer — no external ingress.
+# Metrics are scraped by Prometheus from the /metrics endpoint.
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/org/event-worker
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+serviceAccount:
+  create: true
+  name: ""
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/event-worker-irsa
+
+# ClusterIP service exposes the Prometheus metrics endpoint only — not for external traffic.
+service:
+  type: ClusterIP
+  metricsPort: 8080
+  healthPort: 8081
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  # Scale on Kafka consumer lag — fires before CPU becomes the bottleneck.
+  # Requires prometheus-adapter with kafka_consumer_lag metric exposed.
+  kafkaLagTarget: "5000"
+
+pdb:
+  minAvailable: 1
+
+# Kafka and worker configuration — injected as environment variables.
+# Sensitive values (KAFKA_SASL_PASSWORD) come from the secretRef.
+kafka:
+  bootstrapServers: "kafka:9092"
+  groupId: "event-worker"
+  topics: "domain.request.created,domain.entity.created"
+  autoOffsetReset: "earliest"
+  sessionTimeoutMs: "30000"
+  heartbeatIntervalMs: "3000"
+
+env:
+  LOG_LEVEL: info
+  WORKER_ID: "" # Injected by Downward API (pod name) — see deployment.yaml
+  METRICS_PORT: "8080"
+  HEALTH_PORT: "8081"
+
+# Secrets injected from Kubernetes Secret — never hardcode values here.
+secretRef: event-worker-secrets
+
+probes:
+  startup:
+    path: /healthz
+    failureThreshold: 12 # 12 × 5s = 60s max startup window (Go starts fast)
+    periodSeconds: 5
+    timeoutSeconds: 2
+  liveness:
+    path: /healthz
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    path: /readyz
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+terminationGracePeriodSeconds: 30

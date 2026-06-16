@@ -1,0 +1,571 @@
+asyncapi: "2.6.0"
+
+info:
+  title: Enterprise AI System — Async Event API
+  version: "0.1.0"
+  description: |
+    Kafka-based async event contracts for the Enterprise AI System.
+    All payloads are PII-masked before publish (ADR-0012).
+    Schema format: Apache Avro, registered in Confluent Schema Registry.
+  contact:
+    name: Tech Lead
+
+defaultContentType: application/json
+
+servers:
+  development:
+    url: localhost:9092
+    protocol: kafka
+    description: Local Kafka broker
+  staging:
+    url: kafka.staging.example.com:9092
+    protocol: kafka
+    security:
+      - saslScram: []
+
+channels:
+  domain.request.created:
+    description: Fired when a user submits a new domain request via the REST API.
+    x-stability: stable
+    x-sunset-date: null
+    subscribe:
+      operationId: onDomainRequestCreated
+      summary: Agent Service consumes new requests
+      message:
+        $ref: "#/components/messages/DomainRequestCreated"
+    publish:
+      operationId: publishDomainRequestCreated
+      summary: API Gateway publishes after validating user input
+      message:
+        $ref: "#/components/messages/DomainRequestCreated"
+
+  agent.action.proposed:
+    description: Fired when the agent proposes an action that requires HITL approval.
+    x-stability: stable
+    x-sunset-date: null
+    subscribe:
+      operationId: onAgentActionProposed
+      summary: HITL Gateway consumes proposed actions
+      message:
+        $ref: "#/components/messages/AgentActionProposed"
+    publish:
+      operationId: publishAgentActionProposed
+      summary: Agent Service publishes when risk_score >= HITL threshold
+      message:
+        $ref: "#/components/messages/AgentActionProposed"
+
+  agent.action.approved:
+    description: Fired when a human reviewer approves a HITL request.
+    x-stability: stable
+    x-sunset-date: null
+    subscribe:
+      operationId: onAgentActionApproved
+      message:
+        $ref: "#/components/messages/HITLDecision"
+    publish:
+      operationId: publishAgentActionApproved
+      message:
+        $ref: "#/components/messages/HITLDecision"
+
+  agent.action.rejected:
+    description: Fired when a human reviewer rejects a HITL request.
+    x-stability: stable
+    x-sunset-date: null
+    subscribe:
+      operationId: onAgentActionRejected
+      message:
+        $ref: "#/components/messages/HITLDecision"
+    publish:
+      operationId: publishAgentActionRejected
+      message:
+        $ref: "#/components/messages/HITLDecision"
+
+  agent.action.expired:
+    description: |
+      Fired when a HITL request expires without a human decision.
+      Timeout always results in EXPIRED_AUTO_REJECTED — never auto-approval (ADR-0011).
+    x-stability: stable
+    x-sunset-date: null
+    subscribe:
+      operationId: onAgentActionExpired
+      message:
+        $ref: "#/components/messages/HITLExpired"
+    publish:
+      operationId: publishAgentActionExpired
+      message:
+        $ref: "#/components/messages/HITLExpired"
+
+  agent.action.executed:
+    description: Fired after an agent action completes execution (HOTL or post-HITL approval).
+    x-stability: stable
+    x-sunset-date: null
+    subscribe:
+      operationId: onAgentActionExecuted
+      message:
+        $ref: "#/components/messages/AgentActionExecuted"
+    publish:
+      operationId: publishAgentActionExecuted
+      message:
+        $ref: "#/components/messages/AgentActionExecuted"
+
+  domain.result.completed:
+    description: Fired when the full domain request processing pipeline completes.
+    x-stability: stable
+    x-sunset-date: null
+    subscribe:
+      operationId: onDomainResultCompleted
+      message:
+        $ref: "#/components/messages/DomainResultCompleted"
+    publish:
+      operationId: publishDomainResultCompleted
+      message:
+        $ref: "#/components/messages/DomainResultCompleted"
+
+  agent.feedback.applied:
+    description: |
+      Fired when the FeedbackLoop adjusts a risk_score bias for an action_type.
+      Consumers can use this to track convergence and audit automated risk adjustments.
+      No PII — action_type is an enum value, not user data (spec: specs/ai/feedback-loop.md §7).
+    x-stability: beta
+    x-sunset-date: null
+    subscribe:
+      operationId: onAgentFeedbackApplied
+      summary: Observability consumers track bias convergence
+      message:
+        $ref: "#/components/messages/AgentFeedbackApplied"
+    publish:
+      operationId: publishAgentFeedbackApplied
+      summary: FeedbackLoop publishes on every bias adjustment
+      message:
+        $ref: "#/components/messages/AgentFeedbackApplied"
+
+  audit.event.written:
+    description: Fired for every immutable audit record written by the Audit Logger.
+    x-stability: stable
+    x-sunset-date: null
+    subscribe:
+      operationId: onAuditEventWritten
+      message:
+        $ref: "#/components/messages/AuditEventWritten"
+    publish:
+      operationId: publishAuditEventWritten
+      message:
+        $ref: "#/components/messages/AuditEventWritten"
+
+  domain.request.dlq:
+    description: |
+      Dead Letter Queue for domain requests that exhausted all retry attempts.
+      Published by the request consumer after kafka_consumer_max_retries failures.
+      Messages are identical to domain.request.created envelopes plus a dlq_error field.
+      Operators replay by re-publishing the original payload to domain.request.created
+      (after resetting the request status to "queued" in the request store).
+      Spec: specs/system/request-pipeline.md §DLQ. REM-012.
+    x-stability: stable
+    x-sunset-date: null
+    subscribe:
+      operationId: onDomainRequestDlq
+      summary: Ops tooling / replay consumers monitor unrecoverable failures
+      message:
+        $ref: "#/components/messages/DomainRequestFailed"
+    publish:
+      operationId: publishDomainRequestDlq
+      summary: Request consumer publishes after exhausting all retry attempts
+      message:
+        $ref: "#/components/messages/DomainRequestFailed"
+
+  agent.harness.state:
+    description: |
+      Published after each significant state transition in a multi-agent harness sprint
+      (started, evaluated, patch applied, escalated, completed). Consumers use this to
+      track sprint progress across agents without polling.
+      Proto schema: infrastructure/proto/harness_state.proto (HarnessStateEnvelope).
+      Spec: specs/ai/harness-design.md §2, §9. ADR-0013, ADR-0014.
+      All user-content fields are PII-masked before publish.
+    x-stability: beta
+    x-sunset-date: null
+    subscribe:
+      operationId: onHarnessStateChanged
+      summary: External consumers (dashboards, audit aggregators) track sprint state
+      message:
+        $ref: "#/components/messages/HarnessStateChanged"
+    publish:
+      operationId: publishHarnessStateChanged
+      summary: HarnessCoordinator publishes on every sprint state transition
+      message:
+        $ref: "#/components/messages/HarnessStateChanged"
+
+components:
+  messages:
+    DomainRequestCreated:
+      name: DomainRequestCreated
+      title: Domain Request Created
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/DomainRequestCreatedPayload"
+
+    AgentActionProposed:
+      name: AgentActionProposed
+      title: Agent Action Proposed
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/AgentActionProposedPayload"
+
+    HITLDecision:
+      name: HITLDecision
+      title: HITL Decision (Approved or Rejected)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/HITLDecisionPayload"
+
+    HITLExpired:
+      name: HITLExpired
+      title: HITL Request Expired
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/HITLExpiredPayload"
+
+    AgentActionExecuted:
+      name: AgentActionExecuted
+      title: Agent Action Executed
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/AgentActionExecutedPayload"
+
+    DomainResultCompleted:
+      name: DomainResultCompleted
+      title: Domain Result Completed
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/DomainResultCompletedPayload"
+
+    AgentFeedbackApplied:
+      name: AgentFeedbackApplied
+      title: Agent Feedback Applied
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/AgentFeedbackAppliedPayload"
+
+    AuditEventWritten:
+      name: AuditEventWritten
+      title: Audit Event Written
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/AuditEventWrittenPayload"
+
+    DomainRequestFailed:
+      name: DomainRequestFailed
+      title: Domain Request Failed (DLQ)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/DomainRequestFailedPayload"
+
+    HarnessStateChanged:
+      name: HarnessStateChanged
+      title: Harness State Changed
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/HarnessStateChangedPayload"
+
+  schemas:
+    EventEnvelope:
+      type: object
+      required:
+        [
+          event_id,
+          event_type,
+          schema_version,
+          produced_at,
+          trace_id,
+          producer_service,
+        ]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+        schema_version:
+          type: string
+          example: "1.0"
+        produced_at:
+          type: string
+          format: date-time
+        trace_id:
+          type: string
+          description: W3C traceparent for distributed tracing
+        producer_service:
+          type: string
+
+    DomainRequestCreatedPayload:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          required: [payload]
+          properties:
+            payload:
+              type: object
+              properties:
+                request_id:
+                  type: string
+                  format: uuid
+                request_text:
+                  type: string
+                  description: PII-masked request text
+                priority:
+                  type: string
+
+    AgentActionProposedPayload:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          required: [payload]
+          properties:
+            payload:
+              type: object
+              properties:
+                request_id:
+                  type: string
+                  format: uuid
+                agent_id:
+                  type: string
+                action_type:
+                  type: string
+                risk_score:
+                  type: number
+                  minimum: 0.0
+                  maximum: 1.0
+                context_summary:
+                  type: string
+                  description: PII-masked context summary for HITL reviewer
+                expires_at:
+                  type: string
+                  format: date-time
+
+    HITLDecisionPayload:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          required: [payload]
+          properties:
+            payload:
+              type: object
+              properties:
+                request_id:
+                  type: string
+                  format: uuid
+                decision:
+                  type: string
+                  enum: [APPROVED, REJECTED]
+                rationale:
+                  type: string
+
+    HITLExpiredPayload:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          required: [payload]
+          properties:
+            payload:
+              type: object
+              properties:
+                request_id:
+                  type: string
+                  format: uuid
+                outcome:
+                  type: string
+                  enum: [EXPIRED_AUTO_REJECTED]
+
+    AgentActionExecutedPayload:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          required: [payload]
+          properties:
+            payload:
+              type: object
+              properties:
+                agent_id:
+                  type: string
+                action_type:
+                  type: string
+                outcome:
+                  type: string
+
+    DomainResultCompletedPayload:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          required: [payload]
+          properties:
+            payload:
+              type: object
+              properties:
+                request_id:
+                  type: string
+                  format: uuid
+                status:
+                  type: string
+                  enum: [completed, failed]
+                result_summary:
+                  type: string
+                  description: PII-masked result summary
+
+    AgentFeedbackAppliedPayload:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          required: [payload]
+          properties:
+            payload:
+              type: object
+              required:
+                [action_type, previous_bias, new_bias, direction, reason]
+              properties:
+                action_type:
+                  type: string
+                  description: Enum value identifying the agent action type — no PII
+                previous_bias:
+                  type: number
+                  minimum: 0.0
+                  maximum: 0.5
+                new_bias:
+                  type: number
+                  minimum: 0.0
+                  maximum: 0.5
+                direction:
+                  type: string
+                  enum: [up, down]
+                reason:
+                  type: string
+                  description: Human-readable explanation of why the bias was adjusted
+
+    AuditEventWrittenPayload:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          required: [payload]
+          properties:
+            payload:
+              type: object
+              properties:
+                audit_event_id:
+                  type: string
+                  format: uuid
+                agent_id:
+                  type: string
+                event_type:
+                  type: string
+                outcome:
+                  type: string
+
+    DomainRequestFailedPayload:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          required: [payload, dlq_error]
+          properties:
+            payload:
+              type: object
+              properties:
+                request_id:
+                  type: string
+                  format: uuid
+                request_text:
+                  type: string
+                  description: PII-masked request text (unchanged from original envelope)
+            dlq_error:
+              type: string
+              description: Error message from the final failed attempt
+
+    HarnessStateChangedPayload:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          required: [correlation_id, task_id, sprint_id, status, iteration]
+          properties:
+            correlation_id:
+              type: string
+              format: uuid
+              description: Propagated across all agents in a single user request
+            task_id:
+              type: string
+              description: Ties back to the originating TaskBrief
+            sprint_id:
+              type: string
+              format: uuid
+            status:
+              type: string
+              enum: [PENDING, IN_PROGRESS, PASSED, FAILED, ESCALATED, COMPLETED]
+            iteration:
+              type: integer
+              minimum: 1
+            autonomy_level:
+              type: string
+              enum: [READ_ONLY, TESTS_ONLY, LOW_RISK, MEDIUM_RISK, FULL]
+            sprint_evaluated:
+              type: object
+              description: Present when status is PASSED or FAILED
+              properties:
+                quality:
+                  type: number
+                  minimum: 0.0
+                  maximum: 1.0
+                originality:
+                  type: number
+                  minimum: 0.0
+                  maximum: 1.0
+                craft:
+                  type: number
+                  minimum: 0.0
+                  maximum: 1.0
+                functionality:
+                  type: number
+                  minimum: 0.0
+                  maximum: 1.0
+                average:
+                  type: number
+                  minimum: 0.0
+                  maximum: 1.0
+                passed:
+                  type: boolean
+                masked_feedback:
+                  type: string
+                  description: PII-masked evaluator feedback (max 500 chars)
+            patch_proposal_applied:
+              type: object
+              description: Present when a PatchProposal was generated for this iteration
+              properties:
+                masked_previous_approach_summary:
+                  type: string
+                masked_proposed_alternative:
+                  type: string
+            sprint_escalated:
+              type: object
+              description: Present when status is ESCALATED
+              properties:
+                final_score_average:
+                  type: number
+                total_iterations:
+                  type: integer
+                patch_proposals_applied:
+                  type: integer
+                hitl_request_id:
+                  type: string
+                  format: uuid
+            sprint_completed:
+              type: object
+              description: Present when status is COMPLETED (evaluator passed)
+              properties:
+                final_score_average:
+                  type: number
+                total_iterations:
+                  type: integer
+                patch_proposals_applied:
+                  type: integer
+                decision_count:
+                  type: integer
+
+  securitySchemes:
+    saslScram:
+      type: scramSha512
+      description: SASL/SCRAM-SHA-512 authentication for production Kafka

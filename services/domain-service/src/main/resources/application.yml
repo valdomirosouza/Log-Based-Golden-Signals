@@ -1,0 +1,70 @@
+spring:
+  application:
+    name: domain-service
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/appdb}
+    username: ${DATABASE_USER:appuser}
+    password: ${DATABASE_PASSWORD:placeholder-set-in-env}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP:domain-service-group}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+server:
+  port: ${APP_PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true # enables /actuator/health/liveness and /actuator/health/readiness
+  health:
+    livenessState:
+      enabled: true # JVM + application-level liveness (no external deps)
+    readinessState:
+      enabled: true # DataSource + Kafka consumer readiness
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+  # Distributed tracing → OTel exported over OTLP/HTTP (W2-11b, #229). Sampling defaults to
+  # full locally; set OTEL_TRACES_SAMPLER_ARG (e.g. 0.1) to sub-sample in shared environments.
+  # service.name on the spans is taken from spring.application.name above.
+  tracing:
+    sampling:
+      probability: ${OTEL_TRACES_SAMPLER_ARG:1.0}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+
+app:
+  kafka:
+    topics:
+      request-created: ${KAFKA_TOPIC_REQUEST_CREATED:request.created.v1}
+      entity-created: ${KAFKA_TOPIC_ENTITY_CREATED:domain.entity.created.v1}
+      entity-updated: ${KAFKA_TOPIC_ENTITY_UPDATED:domain.entity.updated.v1}

@@ -1,0 +1,125 @@
+name: Model Contract Tests
+
+# Runs only when the model dependency manifest or AI specs change.
+# Requires ANTHROPIC_API_KEY to be set in repository secrets.
+# See ADR-0051 and docs/dependency-manifest.yaml for the contract versioning scheme.
+#
+# Budget circuit breaker (Q5 — non-blocking):
+# If LLM_CI_CURRENT_MONTH_SPEND_USD >= LLM_CI_MONTHLY_BUDGET_USD (default $50),
+# the model-contract-tests job is skipped and a PR comment is posted instead.
+# The overall workflow still passes (non-blocking gate).
+on:
+  pull_request:
+    paths:
+      - "docs/dependency-manifest.yaml"
+      - "specs/ai/**"
+      - "tests/model_contract/**"
+  workflow_dispatch:
+    inputs:
+      model_id:
+        description: "Model ID to test against (overrides CONTRACT_MODEL_ID default)"
+        required: false
+        default: "claude-sonnet-4-6"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  budget-check:
+    name: LLM Budget Circuit Breaker
+    runs-on: ubuntu-latest
+    outputs:
+      budget_ok: ${{ steps.check.outputs.budget_ok }}
+      remaining_usd: ${{ steps.check.outputs.remaining_usd }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Check LLM CI budget
+        id: check
+        env:
+          LLM_CI_CURRENT_MONTH_SPEND_USD: ${{ vars.LLM_CI_CURRENT_MONTH_SPEND_USD || '0' }}
+          LLM_CI_MONTHLY_BUDGET_USD: ${{ vars.LLM_CI_MONTHLY_BUDGET_USD || '50' }}
+        run: python3 scripts/check_llm_budget.py
+
+  model-contract-tests:
+    name: Model Behavioral Contract (ML1 / ADR-0051)
+    runs-on: ubuntu-latest
+    needs: budget-check
+    if: needs.budget-check.outputs.budget_ok == 'true'
+    timeout-minutes: 15
+
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CONTRACT_MODEL_ID: ${{ github.event.inputs.model_id || 'claude-sonnet-4-6' }}
+      PYTHONPATH: .
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Verify ANTHROPIC_API_KEY is present
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY}" ]; then
+            echo "::error::ANTHROPIC_API_KEY secret is not set. Add it in repo Settings → Secrets."
+            exit 1
+          fi
+
+      - name: Run model contract tests
+        run: |
+          uv run pytest tests/model_contract/ -m model_contract \
+            -v \
+            --tb=short \
+            --timeout=60 \
+            -p no:cacheprovider
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: model-contract-report
+          path: |
+            .pytest_cache/
+          retention-days: 30
+
+  budget-warning:
+    name: Post budget exhaustion comment
+    runs-on: ubuntu-latest
+    needs: budget-check
+    if: |
+      needs.budget-check.outputs.budget_ok != 'true' &&
+      github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Comment on PR — budget exhausted
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const remaining = '${{ needs.budget-check.outputs.remaining_usd }}';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: [
+                '> **⚠️ Model Contract Tests Skipped — LLM CI Budget Exhausted**',
+                '>',
+                '> The monthly LLM CI spend cap has been reached.',
+                `> Remaining budget: **$${remaining}**`,
+                '>',
+                '> Model behavioral contract tests (`tests/model_contract/`) were **not run** for this PR.',
+                '> They will resume automatically next calendar month when the budget resets.',
+                '>',
+                '> To override: re-run with `workflow_dispatch` after increasing `LLM_CI_MONTHLY_BUDGET_USD` in repo variables.',
+                '>',
+                '> _This is a non-blocking gate (ADR-0051 Q5). The PR may still be merged with Tech Lead acknowledgement._',
+              ].join('\n'),
+            });

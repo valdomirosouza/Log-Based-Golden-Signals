@@ -1,0 +1,20 @@
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+import "./globals.css";
+import { WebVitals } from "@/components/observability/WebVitals";
+
+export const metadata: Metadata = {
+  title: "Enterprise Platform",
+  description: "Internal tooling — HITL approval queue and request management",
+};
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <WebVitals />
+        {children}
+      </body>
+    </html>
+  );
+}
