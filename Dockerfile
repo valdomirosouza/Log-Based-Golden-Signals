@@ -6,7 +6,7 @@
 # automatically. Patch-level pinning (python:3.13.x-slim) locks you to a
 # specific OS image that may carry unfixed CVEs; use digest pinning via a bot
 # (e.g. Renovate) that also runs a security scan before merging the update.
-FROM python:3.13-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /build
 
@@ -24,7 +24,7 @@ RUN uv sync --no-dev --frozen
 COPY src/ ./src/
 
 # ── Stage 2: production ───────────────────────────────────────────────────────
-FROM python:3.13-slim AS production
+FROM python:3.14-slim AS production
 
 # Security: run as non-root user
 RUN groupadd --gid 1001 appgroup && \
