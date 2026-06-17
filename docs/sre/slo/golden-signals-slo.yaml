@@ -29,3 +29,50 @@ hitl_triggers:
   error_rate: 0.05 # HITL_ERROR_RATE
   saturation_pct: 80 # [CONFIRM] — derived from bytes_sent proxy (ADR-0068)
 metrics_source: Micrometer + /actuator/prometheus (exposed; application.yml management.endpoints)
+
+# ── ENVIRONMENT SLIs (SPEC-LGS-002 §10(b); ADR-0084/0085) ────────────────────
+# SLIs of the demonstration ENVIRONMENT itself (the HAProxy→shipper→/ingestion
+# bridge + compose orchestration), DISTINCT from the service SLOs above and from
+# the Golden Signals the pipeline COMPUTES about HAProxy traffic (§10(a)). The
+# four objectives below were proposed at Phase 4 (§10(b), `RECOMMENDED`) and are
+# confirmed-as-written by the Phase-4 approval gate (spec status: approved,
+# 2026-06-16, tech_lead + acting security_lead dual sign-off). SRE-Lead PRR
+# sign-off (Phase 11) is still pending — these are committed objectives, not yet
+# PRR-approved for any production promotion (the rig is not prod-deployed).
+environment:
+  description: >-
+    SLIs for the gs demonstration rig (compose profile `golden-signals`). Source
+    metrics are the gs-log-shipper ShipperCounters (parse_errors_total,
+    lines_parsed_total, batches_shipped_total, entries_accepted_total,
+    entries_dropped_total, retries_total). NOTE (Phase-11 gap): these counters
+    are currently emitted only as structured-JSON stdout log events, NOT on a
+    scrapeable Prometheus /metrics endpoint — see RB-SRE-GS-003 and the §10(b)
+    follow-up. SLIs below are therefore derived from log aggregation today; a
+    /metrics endpoint on the shipper is the documented uplift.
+  slos:
+    - id: shipper-delivery-ratio
+      description: entries delivered to /ingestion ÷ HAProxy lines logged for monitored paths (G-03)
+      sli: entries_accepted_total / lines_parsed_total # steady-state, monitored paths
+      objective: 99.9% # CONFIRMED (Phase-4 §10(b))
+      window: steady-state-run
+    - id: shipper-ship-lag-seconds
+      description: time from HAProxy log emit to 202 from /ingestion (per-batch)
+      sli: histogram_quantile(0.99, gs_shipper_ship_lag_seconds) # P99; derived from batch_shipped log ts deltas today
+      objective_seconds_p99: 5 # CONFIRMED (Phase-4 §10(b))
+      window: steady-state-run
+    - id: env-cold-start-seconds
+      description: gs-up invocation to all-healthy (haproxy + shipper + golden-signals + redis)
+      sli: time(make gs-up -> all healthcheck `healthy`) # measured via gs-smoke / compose ps
+      objective_seconds: 120 # CONFIRMED (Phase-4 §10(b)); reference runner
+      window: per-startup
+    - id: parse-error-ratio
+      description: unparseable HAProxy lines ÷ total lines offered to the shipper
+      sli: parse_errors_total / (parse_errors_total + lines_parsed_total)
+      objective: 0.1% # CONFIRMED (Phase-4 §10(b))
+      window: steady-state-run
+  metrics_source: >-
+    gs-log-shipper ShipperCounters via structured-JSON stdout (event=batch_shipped /
+    parse_error / batch_dropped_*). A Prometheus /metrics endpoint on the shipper
+    is a documented Phase-11 follow-up (not yet wired) — until then SLIs derive
+    from log aggregation. The golden-signals service exposes /actuator/prometheus
+    (above) once the Java image is built (full-service observability DEFERRED).

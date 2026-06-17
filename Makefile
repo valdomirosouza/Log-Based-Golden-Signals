@@ -7,6 +7,7 @@ APP         ?= web
 .PHONY: setup setup-minimal setup-core setup-observability setup-full \
         infra-up infra-down infra-down-core infra-down-full infra-reset smoke \
         test-infra-up test-infra-down \
+        gs-up gs-demo gs-smoke gs-down test-unit-golden-signals \
         test test-unit test-security lint format build \
         test-python test-unit-python test-security-python lint-python format-python build-python run run-python \
         guard-SERVICE \
@@ -75,6 +76,43 @@ test-infra-up: ## Start lightweight integration-test infrastructure (offset port
 
 test-infra-down: ## Stop integration-test infrastructure and wipe test volumes
 	docker compose -f docker-compose.test.yml down -v
+
+# ── Log-Based Golden Signals demonstration environment (SPEC-LGS-002, B-13) ──
+# ENV-FR-08/10. The golden-signals service is a Java black box (ADR-0066) with
+# NO runnable image yet — these targets use the contract-shaped STUB; live
+# gs-demo (AC-01/AC-10) against the real image is deferred-and-logged.
+gs-up: ## Golden Signals: build + start the `golden-signals` compose profile (health-ordered)
+	@test -n "$$GS_API_KEYS" || { echo "GS_API_KEYS is required (ENV-FR-09); set it in .env / the environment"; exit 1; }
+	docker compose --profile golden-signals up -d --build
+
+gs-demo: ## Golden Signals: run the deterministic traffic generator end-to-end (one-shot)
+	@test -n "$$GS_API_KEYS" || { echo "GS_API_KEYS is required (ENV-FR-09)"; exit 1; }
+	docker compose --profile golden-signals run --rm gs-traffic-generator
+
+gs-smoke: ## Golden Signals: fast health-only check (analytics /health → 200)
+	@curl -fsS "http://localhost:$${GS_ANALYTICS_PORT:-8085}/analytics/health" \
+		&& echo "" && echo "gs-smoke: /analytics/health OK" \
+		|| { echo "gs-smoke: /analytics/health unreachable"; exit 1; }
+
+gs-down: ## Golden Signals: tear down the profile AND remove named volumes (zero residue, ENV-FR-10)
+	docker compose --profile golden-signals down -v --remove-orphans
+
+# SPEC-LGS-002 Phase 8: the gs-* demonstration components live under
+# infrastructure/golden-signals/ with their own Python packages, so they are NOT in
+# the repo's `tests/unit/` scope (testpaths=["tests"], coverage source=["src"]). This
+# target runs each component's suite against its OWN package coverage with an 80% floor
+# (§3.5). It does NOT touch the src/ coverage gate (--cov-fail-under=85). CI runs it as a
+# dedicated step in the test-unit job so the gs-* tests block on every PR.
+test-unit-golden-signals: ## Golden Signals: run gs-* component unit tests (own 80% coverage floor)
+	cd infrastructure/golden-signals/gs-log-shipper && \
+		uv run --project $(CURDIR) pytest tests/ -q \
+		--cov=gs_log_shipper --cov-report=term-missing --cov-fail-under=80
+	cd infrastructure/golden-signals/gs-traffic-generator && \
+		uv run --project $(CURDIR) pytest tests/ -q \
+		--cov=gs_traffic_generator --cov-report=term-missing --cov-fail-under=80
+	cd infrastructure/golden-signals/golden-signals-stub && \
+		uv run --project $(CURDIR) pytest tests/ -q \
+		--cov=stub --cov-report=term-missing --cov-fail-under=80
 
 # ── Python ─────────────────────────────────────────────────────────────────
 
