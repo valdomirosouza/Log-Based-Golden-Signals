@@ -34,7 +34,7 @@ jobs:
       p99_max: ${{ steps.read.outputs.p99_max }}
       budget_min: ${{ steps.read.outputs.budget_min }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Resolve and read the service SLO file (no silent default)
         id: read
         env:
@@ -63,7 +63,7 @@ jobs:
     name: CAB Approval Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Validate change type label and RFC approval
         run: |
           python3 - << 'EOF'
@@ -252,7 +252,7 @@ jobs:
     environment: production
     if: ${{ inputs.strategy == 'canary' }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Set up Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
@@ -302,7 +302,7 @@ jobs:
     # load-slo provides the SLO-driven Golden Signals thresholds (ADR-0073).
     needs: [load-slo, deploy-canary]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Set up Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
@@ -374,7 +374,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: promote-canary-25
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Set up Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
@@ -425,7 +425,7 @@ jobs:
     outputs:
       lead_time_source: ${{ steps.lead-time.outputs.source }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0 # full history so the version tag's commit date is resolvable
           fetch-tags: true
@@ -524,7 +524,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: true
 
@@ -567,6 +567,6 @@ jobs:
     needs: [deploy-canary, promote-canary-25, promote-canary-100]
     if: failure()
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Execute rollback
         run: bash infrastructure/scripts/deploy/rollback.sh --env production

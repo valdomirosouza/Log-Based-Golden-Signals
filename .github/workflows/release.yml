@@ -25,7 +25,7 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
       version: ${{ steps.release.outputs.version }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0 # full history so the version.txt sync step (RFC-0005) can operate on the release branch
           # Persist the PAT as the git credential so the version-sync step's push below is authored
@@ -98,7 +98,7 @@ jobs:
     # below for the explanatory notice (RFC-0009, #96).
     if: needs.release-please.outputs.release_created == 'true' && vars.CONTAINER_REGISTRY != ''
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Compute lowercase image name (GHCR/OCI require lowercase)
         id: img

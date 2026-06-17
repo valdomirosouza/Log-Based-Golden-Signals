@@ -43,7 +43,7 @@ jobs:
       # Custom in-toto predicate type for the DAST attestation; cd-production verifies the same URI.
       DAST_PREDICATE_TYPE: https://github.com/valdomirosouza/Repository-Template-v2/attestations/zap-dast/v1
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ inputs.sha }}
 
@@ -68,7 +68,7 @@ jobs:
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
 
       - name: OWASP ZAP Full Scan (authenticated)
-        uses: zaproxy/action-full-scan@d2a07475d467566c9a3e3c700f31f47724aa1060 # v0.10.0
+        uses: zaproxy/action-full-scan@3c58388149901b9a03b7718852c5ba889646c27c # v0.13.0
         with:
           target: ${{ vars.STAGING_BASE_URL }}/api
           rules_file_name: ".zap/rules.tsv"
