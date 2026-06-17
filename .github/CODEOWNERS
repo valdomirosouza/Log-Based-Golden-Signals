@@ -76,6 +76,9 @@ docs/sre/                            @your-org/sre-team
 infrastructure/                      @your-org/sre-team @your-org/devops-team
 harness/                             @your-org/devops-team
 infrastructure/scripts/deploy/       @your-org/devops-team @your-org/sre-team
+# Log-Based Golden Signals demonstration environment (SPEC-LGS-002, ADR-0085 §7):
+# environment scaffolding (NOT a services.yaml entry) — governed here.
+infrastructure/golden-signals/       @your-org/sre-team @your-org/devops-team @your-org/tech-leads
 
 # ── Change Management ─────────────────────────────────────────────────────────
 docs/change-management/              @your-org/tech-leads

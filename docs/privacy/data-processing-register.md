@@ -3,7 +3,7 @@
 **Record of Processing Activities — GDPR Art. 30 / LGPD Art. 37**
 **Controller:** \<Organisation Name\>
 **DPO:** dpo@\<org-domain\>
-**Last updated:** 2026-05-24
+**Last updated:** 2026-06-16 (added Activity 6 — SPEC-LGS-002 log-shipping bridge; lightweight note, full DPIA waived)
 
 ---
 
@@ -108,6 +108,24 @@
 | **Retention**              | Provider retains for \<N\> days per DPA; we retain anonymised logs for 30 days |
 | **Technical measures**     | PII masking mandatory before every API call (ADR-0012)                         |
 | **DPIA required**          | Yes — see `docs/privacy/dpia/dpia-v1.md`                                       |
+
+---
+
+### Activity 6 — Golden-Signals HAProxy Log-Shipping Bridge (`gs-log-shipper`) — SPEC-LGS-002
+
+| Field                      | Detail                                                                                                                                                                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Purpose**                | Demonstration/CI environment that ships HAProxy access-log lines to the `golden-signals` `/ingestion` API so the four Golden Signals are computed from real proxy traffic (SPEC-LGS-002).                                      |
+| **Legal basis (GDPR)**     | Legitimate interest — Art. 6(1)(f) (operational telemetry / reliability)                                                                                                                                                       |
+| **Legal basis (LGPD)**     | Legitimate interest — Art. 7, IX                                                                                                                                                                                               |
+| **Data categories**        | Telemetry-L2 with a PII field: `client_ip` (`%ci`) in the shipped log entry. Other fields (path, method, status, response time, bytes) are non-personal telemetry.                                                             |
+| **Data subjects**          | **Synthetic only** — traffic originates from the deterministic `gs-traffic-generator`; no real data subjects in the demonstration rig.                                                                                         |
+| **Recipients**             | Internal only — `golden-signals` service on the isolated `gs-net` network. Not host-published; not exported.                                                                                                                   |
+| **Third-party processors** | None.                                                                                                                                                                                                                          |
+| **Cross-border transfer**  | No.                                                                                                                                                                                                                            |
+| **Retention**              | Ephemeral Redis (no `--save`); TTL-bounded via `RETENTION_1M_SECONDS` / `RETENTION_5M_SECONDS`; `make gs-down` removes all volumes (SPEC-LGS-002 §9.3).                                                                        |
+| **Technical measures**     | `client_ip` masked by the service before persist/log (SPEC-LGS-001 FR-02, ADR-0012); shipper forbidden from writing raw IP to stdout (ENV-NFR-04); raw HAProxy logs confined to the internal network; TLS/internal-only Redis. |
+| **DPIA required**          | **No — lightweight register note only.** Synthetic + masked data; full DPIA waived per Phase-2 human disposition (SPEC-LGS-002, FEAT-18). Revisit if ever fed real production traffic.                                         |
 
 ---
 

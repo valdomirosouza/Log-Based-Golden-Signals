@@ -153,6 +153,9 @@ These ADRs apply to every project using this template, regardless of whether the
 | [ADR-0081](ADR-0081-rag-reference-pipeline.md)                             | RAG reference pipeline (chunk→embed→retrieve→rerank→cite→eval; opt-in; controls)         | Accepted   | 2026-06-15 |
 | [ADR-0082](ADR-0082-backup-rpo-rto-and-restore-drill-verification.md)      | Consolidated backup RPO/RTO + scheduled, evidenced restore-drill verification            | Accepted   | 2026-06-15 |
 | [ADR-0083](ADR-0083-frontend-app-directory-rename.md)                      | Rename `frontend/frontend` → `frontend/web` (refines ADR-0023 path; pattern unchanged)   | Accepted   | 2026-06-15 |
+| [ADR-0084](ADR-0084-haproxy-log-shipping-bridge.md)                        | HAProxy log-shipping bridge (`gs-log-shipper`): bespoke Python; at-least-once + `%Tr`    | Proposed   | 2026-06-16 |
+| [ADR-0085](ADR-0085-golden-signals-compose-environment.md)                 | Golden-Signals compose profile (isolated net, limits, pinned tags, ephemeral Redis)      | Proposed   | 2026-06-16 |
+| [ADR-0086](ADR-0086-demonstration-traffic-generator.md)                    | Demonstration traffic generator (`gs-traffic-generator`): seeded, ≥5 paths, HITL bursts  | Proposed   | 2026-06-16 |
 
 ### AI Agents Module _(opt-in)_
 

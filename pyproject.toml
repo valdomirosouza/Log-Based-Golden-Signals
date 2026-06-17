@@ -87,6 +87,9 @@ ignore = [
 # assertions (B017), and ambiguous-unicode in comments/docstrings (RUF002/RUF003)
 # are all idiomatic in test code.
 "tests/**" = ["S", "T20", "E501", "B017", "RUF002", "RUF003"]
+# SPEC-LGS-002 demonstration-environment component tests (not under tests/, so
+# they need the same idiomatic-test ignores: asserts, prints, long fixtures).
+"infrastructure/golden-signals/**/tests/**" = ["S", "T20", "E501", "B017", "RUF002", "RUF003"]
 "alembic/**" = ["S608"]  # Dynamic SQL is standard in Alembic migrations
 "scaffold/scaffold.py" = ["T201"]  # CLI tool — print() is its user-facing output
 "scripts/**" = ["T201"]  # CLI scripts — print() is their user-facing output
