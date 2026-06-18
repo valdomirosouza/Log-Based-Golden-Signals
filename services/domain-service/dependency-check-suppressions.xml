@@ -58,4 +58,30 @@
     <cve>CVE-2026-39883</cve>
     <cve>CVE-2026-39882</cve>
   </suppress>
+  <suppress>
+    <notes><![CDATA[
+      FALSE POSITIVE — WRONG-ECOSYSTEM CPE MATCH (verified 2026-06-17 against NVD; Refs #50,
+      pending Security-Lead confirmation).
+      CVE-2026-24051 (CVSS 7.0, CWE-426 Untrusted Search Path) is an arbitrary-code-execution
+      via local PATH hijacking on macOS/Darwin in OpenTelemetry-GO — the Go SDK
+      go.opentelemetry.io/otel/sdk (sdk/resource host-id detection), affected >= 1.21.0,
+      < 1.40.0, fixed in Go SDK v1.40.0 (ref: GHSA-9h8m-3fm2-qjrq;
+      nvd.nist.gov/vuln/detail/CVE-2026-24051). NVD pins both CPEs to the *go* target
+      (cpe:2.3:a:linuxfoundation:opentelemetry-go:*...:go:* and
+      cpe:2.3:a:opentelemetry:opentelemetry:*...:go:*). This service depends on the JAVA
+      artifact io.opentelemetry.semconv:opentelemetry-semconv — a CONSTANTS-ONLY jar of
+      generated semantic-convention attribute keys with no runtime, process-spawning, PATH
+      resolution, or Go code — so it cannot carry a Go PATH-hijacking ACE. dependency-check
+      mis-attributes the Go CVE to the Java jar via the broad shared product CPE
+      cpe:2.3:a:opentelemetry:opentelemetry and the coincidental version overlap (semconv 1.32.0
+      falls inside the Go 1.21.0–<1.40.0 range). No semconv release can ever "fix" a Go-SDK CVE,
+      and Maven Central lists 1.32.0 as the latest stable semconv, so upgrade is not a remedy.
+      Same fuzzy-CPE / wrong-ecosystem pattern as the semconv (39882/39883), micrometer, and
+      angus entries above. semconv is pulled transitively by micrometer-tracing-bridge-otel
+      (Spring-Boot-BOM-managed). Scoped to this package + CVE only. ACTION: Security Lead to
+      verify against NVD and confirm/revoke.
+    ]]></notes>
+    <packageUrl regex="true">^pkg:maven/io\.opentelemetry\.semconv/opentelemetry-semconv@.*$</packageUrl>
+    <cve>CVE-2026-24051</cve>
+  </suppress>
 </suppressions>
