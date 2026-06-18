@@ -26,7 +26,6 @@ export default function RunTracePage({ params }: PageProps) {
 
   const load = useCallback(async () => {
     try {
-      setLoading(true);
       setError(null);
       setNotFound(false);
       const data = await api.getRunTrace({ requestId });
@@ -43,6 +42,11 @@ export default function RunTracePage({ params }: PageProps) {
   }, [requestId]);
 
   useEffect(() => {
+    // `load` is async; its setState calls run after `await` (or in the loading spinner
+    // pattern), so they are not the synchronous cascading renders this rule targets. The
+    // rule has a known false positive for setState after `await` in a useCallback'd async
+    // function called from an effect — facebook/react#34905, react/react#34743.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 

@@ -2,9 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  experimental: {
-    typedRoutes: true,
-  },
+  // Stabilized in Next 16 — moved out of `experimental`.
+  typedRoutes: true,
 };
 
 export default nextConfig;
