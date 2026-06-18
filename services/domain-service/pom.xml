@@ -212,10 +212,13 @@
           <failBuildOnCVSS>7</failBuildOnCVSS>
           <suppressionFile>dependency-check-suppressions.xml</suppressionFile>
           <formats>HTML,JSON</formats>
-          <!-- NVD API key via env-var indirection (GHSA-qqhq-8r2c-c3f5: never pass the key on the
-               CLI/-D where it can leak in Maven debug logs). CI sets the NVD_API_KEY secret as env.
-               Without the key the NVD feed download is slow + rate-limited (524/429) -> flaky SAST. -->
-          <nvdApiKeyEnvironmentVariable>NVD_API_KEY</nvdApiKeyEnvironmentVariable>
+          <!-- NVD API key read from the NVD_API_KEY env var (repo secret, exposed on the CI step's
+               env) via Maven ${env.X} interpolation — confirmed working on dependency-check-maven
+               10.0.3 (the <nvdApiKeyEnvironmentVariable> param's 10.0.3 support is unconfirmed and a
+               run on it behaved keyless/slow). Not passed on the CLI/-D (GHSA-qqhq-8r2c-c3f5). Empty
+               value degrades gracefully to the keyless path; with the key the NVD download is fast
+               and avoids 524/429 rate-limit flakiness. -->
+          <nvdApiKey>${env.NVD_API_KEY}</nvdApiKey>
           <!-- Treat cached NVD data as valid for 24h so repeat runs skip a full re-download. -->
           <nvdValidForHours>24</nvdValidForHours>
           <!-- OSS Index disabled: its anonymous tier 401/rate-limits on shared CI, making the
