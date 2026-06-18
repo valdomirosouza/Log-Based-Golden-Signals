@@ -63,6 +63,11 @@ jobs:
           done
 
       - name: OWASP Dependency-Check (blocks on CVSS ≥ 7.0)
+        env:
+          # Consumed via <nvdApiKeyEnvironmentVariable>NVD_API_KEY</> in the pom (GHSA-qqhq-8r2c-c3f5:
+          # never pass the key on the CLI). A free key (nvd.nist.gov) makes the NVD download fast and
+          # avoids 524/429 rate-limit flakiness. Empty secret degrades gracefully to the old slow path.
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           find services -name pom.xml -not -path '*/target/*' | while read pomfile; do
             dir=$(dirname "$pomfile")
