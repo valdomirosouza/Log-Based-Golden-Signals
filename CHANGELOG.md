@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file, which adher
 
 ---
 
+## [2.20.2](https://github.com/valdomirosouza/Log-Based-Golden-Signals/compare/v2.20.1...v2.20.2) (2026-06-18)
+
+
+### Build & Dependencies
+
+* **deps:** migrate to Next 16 + React 19 + ESLint 9 flat config ([#57](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/57)) ([fedcf7c](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/fedcf7cf2e27892ad7147222aa579ec5b4419370))
+
 ## [2.20.1](https://github.com/valdomirosouza/Log-Based-Golden-Signals/compare/v2.20.0...v2.20.1) (2026-06-18)
 
 
