@@ -1,5 +1,6 @@
-FROM node:22-alpine AS base
-RUN corepack enable && corepack prepare pnpm@9 --activate
+FROM node:26-alpine AS base
+# Node 25+ no longer bundles corepack; install it explicitly before enabling.
+RUN npm install -g corepack@latest && corepack enable && corepack prepare pnpm@9 --activate
 
 FROM base AS deps
 WORKDIR /app
