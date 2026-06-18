@@ -257,6 +257,11 @@ jobs:
         run: uv sync --extra dev
       - name: Run unit tests
         run: uv run pytest tests/unit/ -v --cov=src --cov-report=xml --cov-fail-under=85
+      - name: Run golden-signals component tests (SPEC-LGS-002)
+        # gs-* components live under infrastructure/golden-signals/ with their own
+        # packages — outside tests/unit/ scope and src/ coverage. Each suite has its
+        # own 80% coverage floor; this does not touch the src/ 85% gate above.
+        run: make test-unit-golden-signals
       - name: Upload coverage
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:

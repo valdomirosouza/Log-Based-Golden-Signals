@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file, which adher
 
 ---
 
+## [2.20.0](https://github.com/valdomirosouza/Log-Based-Golden-Signals/compare/v2.19.0...v2.20.0) (2026-06-17)
+
+
+### Features
+
+* **infra:** SPEC-LGS-002 golden-signals containerised environment & HAProxy log-shipping bridge ([#30](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/30)) ([057926f](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/057926fd8df2be5c072f89acdce62366ed954291))
+
 ## [2.19.0](https://github.com/valdomirosouza/Repository-Template-v2/compare/v2.18.1...v2.19.0) (2026-06-16)
 
 

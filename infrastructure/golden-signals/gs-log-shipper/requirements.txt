@@ -1,0 +1,4 @@
+# gs-log-shipper pinned runtime dependencies (ENV-NFR-05: supply-chain).
+# Pin exact versions so a clean checkout / image build is reproducible
+# (ENV-NFR-01) and Trivy/SBOM scan a fixed surface. Refs ADR-0084, issue #24.
+httpx==0.28.1

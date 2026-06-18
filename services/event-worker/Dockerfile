@@ -1,4 +1,9 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
+# GOTOOLCHAIN=auto lets the Go command self-fetch the toolchain declared in go.mod's
+# `toolchain` directive if the base image bundles an older patch release. This keeps the
+# build resilient to the floating `golang:1.26-alpine` tag drifting to a Go patch level
+# below what go.mod requires (issue #49).
+ENV GOTOOLCHAIN=auto
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
