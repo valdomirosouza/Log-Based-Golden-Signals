@@ -2,6 +2,8 @@ module github.com/yourorg/monorepo/services/event-worker
 
 go 1.26.0
 
+toolchain go1.26.4
+
 require (
 	github.com/prometheus/client_golang v1.20.5
 	github.com/segmentio/kafka-go v0.4.47
