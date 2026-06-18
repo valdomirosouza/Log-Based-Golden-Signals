@@ -12,6 +12,20 @@ All notable changes to this project will be documented in this file, which adher
 
 ---
 
+## [2.20.1](https://github.com/valdomirosouza/Log-Based-Golden-Signals/compare/v2.20.0...v2.20.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* **ci:** reconcile Go toolchain so Go Build Image passes ([#51](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/51)) ([1a0528a](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/1a0528a8694fccc1b94716803b327594e110ff3e))
+* **security:** resolve opentelemetry-semconv CVE-2026-24051 (dependency-check) ([#52](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/52)) ([4205a06](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/4205a0656602ed042376f8d81ab37a089a217668))
+
+
+### Build & Dependencies
+
+* **deps:** bump node from 22-alpine to 26-alpine in /frontend/web ([#8](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/8)) ([82d8495](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/82d849536245b63b3c448d4333bb5417f725feac))
+* **deps:** bump typescript from 5.9.3 to 6.0.3 in /frontend/web ([#9](https://github.com/valdomirosouza/Log-Based-Golden-Signals/issues/9)) ([8888223](https://github.com/valdomirosouza/Log-Based-Golden-Signals/commit/888822336b4b8380ca02abd511ad0803506668d7))
+
 ## [2.20.0](https://github.com/valdomirosouza/Log-Based-Golden-Signals/compare/v2.19.0...v2.20.0) (2026-06-17)
 
 
