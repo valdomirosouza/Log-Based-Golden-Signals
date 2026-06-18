@@ -46,6 +46,18 @@ jobs:
           distribution: microsoft
           cache: maven
 
+      - name: Cache OWASP NVD database
+        # Stable, pom-hash-independent cache for the (~GB) NVD H2 DB so it persists across PRs and
+        # survives NVD outages (524): the unique save key always stores the latest DB, restore-keys
+        # loads the most recent prior DB even on a key miss. Without this, every pom change busted the
+        # maven cache and forced a full NVD re-download (slow + fails hard when NVD is down).
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: nvd-data-v1-${{ github.run_id }}
+          restore-keys: |
+            nvd-data-v1-
+
       - name: Checkstyle
         run: |
           find services -name pom.xml -not -path '*/target/*' | while read pomfile; do
@@ -64,9 +76,9 @@ jobs:
 
       - name: OWASP Dependency-Check (blocks on CVSS ≥ 7.0)
         env:
-          # Consumed via <nvdApiKeyEnvironmentVariable>NVD_API_KEY</> in the pom (GHSA-qqhq-8r2c-c3f5:
-          # never pass the key on the CLI). A free key (nvd.nist.gov) makes the NVD download fast and
-          # avoids 524/429 rate-limit flakiness. Empty secret degrades gracefully to the old slow path.
+          # Consumed via <nvdApiKey>${env.NVD_API_KEY}</> in the pom (GHSA-qqhq-8r2c-c3f5: not on the
+          # CLI). A free key (nvd.nist.gov) lifts NVD rate limits; combined with the NVD-data cache
+          # above this makes the scan fast + resilient. Empty secret degrades to the keyless path.
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           find services -name pom.xml -not -path '*/target/*' | while read pomfile; do
