@@ -215,6 +215,194 @@ services:
       - "8014:8014" # HTTP / OFREP
     restart: unless-stopped
 
+  # ── Log-Based Golden Signals demonstration environment (SPEC-LGS-002) ────────
+  # Profile `golden-signals` (B-12, issue #26). ADR-0085: single isolated gs-net;
+  # host-publish ONLY the HAProxy listener and :8085; Redis NOT host-published;
+  # per-container CPU/mem limits + reservations; pinned tags (no :latest);
+  # health-ordered startup. The golden-signals service is a Java black box
+  # (ADR-0066) with NO runnable image yet — a contract-shaped STUB stands in
+  # until that image exists (live gs-demo AC-01/AC-10 deferred-and-logged).
+  #
+  # Redis reconciliation: ADR-0085 §6 says reuse the existing `redis` service,
+  # but §1/§5 require it unpublished + ephemeral on gs-net — postures the shared
+  # `redis` (host-published, --save) cannot also satisfy. This profile therefore
+  # runs the SAME redis:7-alpine image (not a second implementation) as a
+  # profile-scoped, ephemeral, internal-only `gs-redis`. Recorded in the Phase-6
+  # report as a reconciliation note, not a spec deviation.
+  gs-redis:
+    # Phase-9 CVE remediation (Refs #29, #18; ADR-0029): digest-pinned to a
+    # patched redis 7.4-alpine that clears the fixable Go-stdlib + libcrypto3/
+    # libssl3 CRITICALs (Trivy HIGH,CRITICAL = 0). The plain redis:7-alpine tag
+    # shipped 4 fixable Go-stdlib CRITICALs. Digest pin (ADR-0085 mandates pinned
+    # tags; a digest is stronger — immutable, no silent re-tag drift).
+    image: redis:7.4-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    profiles: [golden-signals]
+    # Ephemeral: no --save (ADR-0085 §5) → gs-down leaves zero residue (AC-13).
+    command: redis-server --loglevel warning --requirepass ${REDIS_PASSWORD:-devpassword}
+    # NOT host-published (ADR-0085 §1 / AC-15) — reachable only over gs-net.
+    networks: [gs-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-devpassword}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 256M }
+        reservations: { cpus: "0.10", memory: 64M }
+    restart: unless-stopped
+
+  golden-signals:
+    # STUB image until the real Java/Spring Boot image exists (ADR-0066, §8 black
+    # box). Built from infrastructure/golden-signals/golden-signals-stub.
+    build:
+      context: ./infrastructure/golden-signals/golden-signals-stub
+      dockerfile: Dockerfile
+    image: gs-golden-signals-stub:0.1.0 # pinned (no :latest) — ENV-NFR-01
+    profiles: [golden-signals]
+    environment:
+      # _(required)_ ENV-FR-09 — set GS_API_KEYS in .env / the environment.
+      # Passed through (not `:?`) so `docker compose config` on OTHER profiles
+      # does not break; the stub/shipper fail fast at start if it is empty.
+      GS_API_KEYS: "${GS_API_KEYS:-}"
+      GS_STUB_PORT: "8085"
+      # Stub-only backpressure injection (default empty → 202 as normal). Lets
+      # AC-04/AC-07/AC-08 force a 429/503 + Retry-After so the LIVE shipper's
+      # bounded-retry/backoff path is demonstrable end-to-end (issue #28).
+      GS_STUB_INGESTION_STATUS: "${GS_STUB_INGESTION_STATUS:-}"
+      GS_STUB_RETRY_AFTER: "${GS_STUB_RETRY_AFTER:-1}"
+      # Service-side TTL retention env wired by the env (owned by ADR-0067).
+      RETENTION_1M_SECONDS: "${RETENTION_1M_SECONDS:-7200}"
+      RETENTION_5M_SECONDS: "${RETENTION_5M_SECONDS:-86400}"
+      SPRING_DATA_REDIS_URL: "redis://:${REDIS_PASSWORD:-devpassword}@gs-redis:6379/0"
+    # Host-publish :8085 (ADR-0085 §1) — the analytics API surface.
+    ports:
+      - "${GS_ANALYTICS_PORT:-8085}:8085"
+    networks: [gs-net]
+    depends_on:
+      gs-redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8085/analytics/health').status==200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits: { cpus: "1.00", memory: 512M }
+        reservations: { cpus: "0.25", memory: 128M }
+    restart: unless-stopped
+
+  gs-log-shipper:
+    build:
+      context: ./infrastructure/golden-signals/gs-log-shipper
+      dockerfile: Dockerfile
+    image: gs-log-shipper:0.1.0 # pinned (no :latest) — ENV-NFR-01
+    profiles: [golden-signals]
+    environment:
+      # _(required)_ ENV-FR-09 — set GS_API_KEYS in .env / the environment.
+      # Passed through (not `:?`) so `docker compose config` on OTHER profiles
+      # does not break; the stub/shipper fail fast at start if it is empty.
+      GS_API_KEYS: "${GS_API_KEYS:-}"
+      GS_INGESTION_URL: "http://golden-signals:8085/ingestion"
+      GS_SHIPPER_BATCH_MAX_ENTRIES: "${GS_SHIPPER_BATCH_MAX_ENTRIES:-100}"
+      GS_SHIPPER_BATCH_MAX_SECONDS: "${GS_SHIPPER_BATCH_MAX_SECONDS:-2.0}"
+      GS_SHIPPER_MAX_RETRIES: "${GS_SHIPPER_MAX_RETRIES:-3}"
+      # Syslog listener bind (ADR-0084 Amendment 2026-06-17 / Defect B, issue
+      # #28). Confined to gs-net; HAProxy reaches it by service name on the
+      # isolated bridge. NOT host-published (ENV-FR-12 / ADR-0085 §1).
+      GS_SHIPPER_SYSLOG_HOST: "${GS_SHIPPER_SYSLOG_HOST:-0.0.0.0}"
+      GS_SHIPPER_SYSLOG_PORT: "${GS_SHIPPER_SYSLOG_PORT:-514}"
+    # No host-published ports: the syslog listener is reachable ONLY over gs-net.
+    networks: [gs-net]
+    depends_on:
+      golden-signals:
+        condition: service_healthy
+    # Healthy = the TCP syslog listener is actually bound, so HAProxy (which
+    # depends on this being healthy) only starts once it has somewhere to log.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket,os; s=socket.create_connection(('127.0.0.1', int(os.environ.get('GS_SHIPPER_SYSLOG_PORT','514'))), 2); s.close()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 256M }
+        reservations: { cpus: "0.10", memory: 64M }
+    restart: unless-stopped
+
+  gs-haproxy:
+    # Phase-9 CVE remediation (Refs #29, #18; ADR-0029): bumped from the now-EOL
+    # 2.9.12-alpine LTS (2 fixable libcrypto3/libssl3 CVE-2026-31789 CRITICALs) to
+    # the current 3.0-alpine LTS, digest-pinned to a patched build that scans
+    # clean (Trivy HIGH,CRITICAL = 0). haproxy.cfg uses only directives portable
+    # to 3.0 (log tcp@, log-format, http-request return). Digest pin > tag
+    # (ADR-0085) — immutable, no silent re-tag drift.
+    image: haproxy:3.0-alpine@sha256:80b31e8a34cc394719e6410a73d4f450f0374d0905ed78d3852332edda790873
+    profiles: [golden-signals]
+    volumes:
+      - ./infrastructure/golden-signals/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    # Host-publish ONLY the HAProxy listener (ADR-0085 §1).
+    ports:
+      - "${GS_HAPROXY_PORT:-8088}:8080"
+    networks: [gs-net]
+    depends_on:
+      # Wait for the shipper's syslog listener to be bound (healthy), not just
+      # started — otherwise HAProxy's first log frames would be dropped.
+      gs-log-shipper:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 128M }
+        reservations: { cpus: "0.10", memory: 32M }
+    restart: unless-stopped
+
+  gs-traffic-generator:
+    build:
+      context: ./infrastructure/golden-signals/gs-traffic-generator
+      dockerfile: Dockerfile
+    image: gs-traffic-generator:0.1.0 # pinned (no :latest) — ENV-NFR-01
+    profiles: [golden-signals]
+    environment:
+      GS_DEMO_TARGET_URL: "http://gs-haproxy:8080"
+      GS_DEMO_SCENARIO: "${GS_DEMO_SCENARIO:-steady}"
+      GS_DEMO_SEED: "${GS_DEMO_SEED:-1337}"
+      GS_DEMO_TOTAL_REQUESTS: "${GS_DEMO_TOTAL_REQUESTS:-500}"
+    networks: [gs-net]
+    depends_on:
+      gs-haproxy:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 128M }
+        reservations: { cpus: "0.10", memory: 32M }
+    restart: "no" # one-shot driver; runs the plan then exits
+
 volumes:
   postgres_data:
   redis_data:
@@ -226,3 +414,9 @@ volumes:
 networks:
   default:
     name: ${COMPOSE_PROJECT_NAME:-monorepo-dev}
+  # SPEC-LGS-002 / ADR-0085 §1: single isolated bridge for the golden-signals
+  # profile. Internal-only datastore reachability; only HAProxy + :8085 are
+  # host-published (via the services' `ports:` above).
+  gs-net:
+    name: ${COMPOSE_PROJECT_NAME:-monorepo-dev}-gs-net
+    driver: bridge
